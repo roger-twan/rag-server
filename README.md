@@ -34,7 +34,7 @@ rag-server/
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/roger-twan/rag-server.git
 cd rag-server
 ```
 
@@ -90,4 +90,4 @@ fastapi run app/main.py
 
 ## API Endpoints
 
-see `localhost:8000/docs`
+see `http://localhost:8000/docs`
