@@ -1,11 +1,11 @@
 from fastapi import APIRouter
 
-from app.services.retriever import retrieve
+from app.services.answer_generator import generate_answer
 
 router = APIRouter()
 
 
 @router.get("/query")
 async def query(q: str):
-    chunks = await retrieve(q)
-    return {"query": q, "result": chunks}
+    answer = await generate_answer(q)
+    return {"query": q, "result": answer}
