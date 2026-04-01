@@ -35,7 +35,7 @@ flowchart LR
     subgraph Retrieval["Retrieval & Generation"]
         HYBRID["Hybrid Search<br/>(Dense + Sparse)"]
         RERANK["Cohere Rerank<br/>rerank-v3.5"]
-        GEMINI["Gemini 2.0<br/>Answer Generation"]
+        ANSWER["Gemini/DeepSeek/OpenAI<br/>Answer Generation"]
     end
 
     GH --> LOADERS
@@ -53,7 +53,7 @@ flowchart LR
     SPARSE --> HYBRID
     
     HYBRID --> RERANK
-    RERANK --> GEMINI
+    RERANK --> ANSWER
 ```
 
 ## Technology Stack
@@ -69,9 +69,10 @@ flowchart LR
   - Sparse vectors: BM25 encoding for keyword search
 
 ### LLM & Embeddings
-- **OpenAI** - `text-embedding-3-small` for embeddings
+- **OpenAI** - `text-embedding-3-small` for embeddings, `gpt-4o` for generation
 - **Cohere** - `rerank-v3.5` for result reranking
 - **Google Gemini** - Answer generation
+- **DeepSeek** - Alternative LLM provider
 
 ### Data Loaders
 - **LlamaIndex** - Document chunking and processing
@@ -217,10 +218,14 @@ rag-server/
 │   ├── indexers/
 │   │   └── vector_indexer.py    # Chunking, embedding, upsert logic
 │   ├── services/
+│   │   ├── answer_generator.py  # LLM answer generation (Google/OpenAI/DeepSeek)
+│   │   ├── chunker.py           # Simple text chunking
 │   │   ├── embedding.py         # OpenAI embeddings
+│   │   ├── frontmatter_parser.py# Markdown frontmatter extraction
 │   │   ├── ingestion.py         # Smart upsert/delete
-│   │   ├── retriever.py         # Hybrid search + reranking
-│   │   └── generation.py        # Gemini answer generation
+│   │   ├── markdown_chunker.py # Markdown-aware chunking
+│   │   └── retriever.py         # Hybrid search + reranking
+│   ├── utils/
 │   └── main.py                  # FastAPI app factory
 ├── tests/
 │   ├── test_vector_indexer.py   # Hash, doc_id, upsert tests
