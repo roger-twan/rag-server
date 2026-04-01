@@ -16,10 +16,10 @@ class TestSyncWebsite:
         """Test that website documents are loaded and ingested."""
         mock_docs = [
             Document(
-                text="Page 1 content", metadata={"path": "/about", "source": "website_rogerink"}
+                text="Page 1 content", metadata={"path": "/about", "source": "website_roger_ink"}
             ),
             Document(
-                text="Page 2 content", metadata={"path": "/contact", "source": "website_rogerink"}
+                text="Page 2 content", metadata={"path": "/contact", "source": "website_roger_ink"}
             ),
         ]
 
@@ -41,7 +41,7 @@ class TestSyncWebsite:
             mock_load.assert_called_once()
             mock_ingest.assert_called_once()
             call_kwargs = mock_ingest.call_args[1]
-            assert call_kwargs["source"] == "website_rogerink"
+            assert call_kwargs["source"] == "website_roger_ink"
             assert call_kwargs["clear_existing"] is False
             assert result["status"] == "success"
 
@@ -56,7 +56,7 @@ class TestSyncWebsite:
             result = await sync_website()
 
             assert result["status"] == "no_data"
-            assert result["source"] == "website_rogerink"
+            assert result["source"] == "website_roger_ink"
 
     @pytest.mark.asyncio
     async def test_returns_error_on_exception(self):

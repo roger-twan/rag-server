@@ -13,7 +13,7 @@ bm25_encoder = BM25Encoder()
 NAMESPACES = {
     "github_notes": "github_notes",
     "github_repos": "github_repos",
-    "website_rogerink": "website_rogerink",
+    "website_roger_ink": "website_roger_ink",
 }
 
 
@@ -72,4 +72,6 @@ def query_hybrid(
 
 def encode_sparse(texts: list[str]) -> list[dict]:
     """Encode texts to sparse vectors using BM25."""
+    # Fit BM25 on the corpus if not already fitted
+    bm25_encoder.fit(texts)
     return bm25_encoder.encode_documents(texts)

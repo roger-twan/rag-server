@@ -100,7 +100,7 @@ async def load_website_documents() -> list[Document]:
         document = Document(
             text=content,
             metadata={
-                "source": "website_rogerink",
+                "source": "website_roger_ink",
                 "url": url,
                 "title": _extract_title_from_url(url),
             },

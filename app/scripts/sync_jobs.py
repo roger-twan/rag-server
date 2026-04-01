@@ -30,14 +30,14 @@ async def sync_website() -> dict[str, Any]:
             logger.warning("No documents found on website")
             return {
                 "status": "no_data",
-                "source": "website_rogerink",
+                "source": "website_roger_ink",
                 "message": "No documents found to index",
             }
 
         # Index documents using smart upsert (only updates changed docs)
         result = await ingest_documents_batch(
             documents=documents,
-            source="website_rogerink",
+            source="website_roger_ink",
             clear_existing=False,  # Smart upsert - only updates changed docs
         )
 
@@ -49,7 +49,7 @@ async def sync_website() -> dict[str, Any]:
 
         return {
             "status": "success",
-            "source": "website_rogerink",
+            "source": "website_roger_ink",
             "message": f"Synced {result.get('documents_updated', 0)} updated, {result.get('documents_unchanged', 0)} unchanged",
             "details": result,
         }
@@ -58,7 +58,7 @@ async def sync_website() -> dict[str, Any]:
         logger.error(f"Failed to sync website: {e}")
         return {
             "status": "error",
-            "source": "website_rogerink",
+            "source": "website_roger_ink",
             "message": f"Failed to sync: {str(e)}",
         }
 

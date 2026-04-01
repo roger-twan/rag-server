@@ -14,7 +14,7 @@ async def ingest_document(
     Args:
         content: Document text content
         metadata: Document metadata (should include 'path' for tracking)
-        source: Data source identifier (github_notes, github_repos, website_rogerink)
+        source: Data source identifier (github_notes, github_repos, website_roger_ink)
 
     Returns:
         Dict with ingestion result
@@ -77,7 +77,7 @@ async def delete_single_document(
     Delete a specific document from Pinecone.
 
     Args:
-        source: Data source identifier (github_notes, github_repos, website_rogerink)
+        source: Data source identifier (github_notes, github_repos, website_roger_ink)
         path: Document path or identifier
 
     Returns:

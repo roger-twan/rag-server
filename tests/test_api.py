@@ -61,7 +61,7 @@ class TestIngestWebsiteEndpoint:
         with patch("app.api.routes.sync_website", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
-                "source": "website_rogerink",
+                "source": "website_roger_ink",
                 "message": "Synced 5 pages",
             }
 
@@ -77,7 +77,7 @@ class TestIngestWebsiteEndpoint:
         with patch("app.api.routes.sync_website", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
-                "source": "website_rogerink",
+                "source": "website_roger_ink",
                 "message": "Synced 2 updated, 3 unchanged",
                 "details": {
                     "documents_updated": 2,

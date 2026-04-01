@@ -77,7 +77,7 @@ class TestPrepareVectors:
         with patch(
             "app.services.embedding.embed_content", new_callable=AsyncMock
         ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
-            mock_embed.return_value = [[0.1] * 1536]  # Single chunk
+            mock_embed.return_value = [[0.1] * 1024]  # Single chunk
             mock_sparse.return_value = [{"indices": [1, 2], "values": [0.5, 0.5]}]
 
             vectors = await prepare_vectors([doc], chunk_size=100, chunk_overlap=0)
@@ -98,7 +98,7 @@ class TestPrepareVectors:
         with patch(
             "app.services.embedding.embed_content", new_callable=AsyncMock
         ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
-            mock_embed.return_value = [[0.1] * 1536]
+            mock_embed.return_value = [[0.1] * 1024]
             mock_sparse.return_value = [{"indices": [1], "values": [0.5]}]
 
             vectors = await prepare_vectors([doc])
@@ -117,7 +117,7 @@ class TestPrepareVectors:
         with patch(
             "app.services.embedding.embed_content", new_callable=AsyncMock
         ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
-            mock_embed.return_value = [[0.1] * 1536]
+            mock_embed.return_value = [[0.1] * 1024]
             mock_sparse.return_value = [{"indices": [1], "values": [0.5]}]
 
             vectors = await prepare_vectors([doc])
@@ -136,7 +136,7 @@ class TestPrepareVectors:
         with patch(
             "app.services.embedding.embed_content", new_callable=AsyncMock
         ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
-            mock_embed.return_value = [[0.1] * 1536, [0.2] * 1536, [0.3] * 1536]
+            mock_embed.return_value = [[0.1] * 1024, [0.2] * 1024, [0.3] * 1024]
             mock_sparse.return_value = [
                 {"indices": [1], "values": [0.5]},
                 {"indices": [2], "values": [0.6]},
@@ -162,7 +162,7 @@ class TestPrepareVectors:
         with patch(
             "app.services.embedding.embed_content", new_callable=AsyncMock
         ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
-            mock_embed.return_value = [[0.1] * 1536]
+            mock_embed.return_value = [[0.1] * 1024]
             mock_sparse.return_value = [{"indices": [1], "values": [0.5]}]
 
             vectors = await prepare_vectors([doc])
@@ -319,7 +319,7 @@ class TestGetNamespaceForSource:
         assert get_namespace_for_source("github_repos") == "github_repos"
 
     def test_website_source(self):
-        assert get_namespace_for_source("website_rogerink") == "website_rogerink"
+        assert get_namespace_for_source("website_roger_ink") == "website_roger_ink"
 
     def test_unknown_source_uses_directly(self):
         assert get_namespace_for_source("custom_source") == "custom_source"

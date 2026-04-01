@@ -150,7 +150,7 @@ async def get_document_chunks(doc_id: str, namespace: str) -> list[dict]:
 
     # Query with doc_id filter to get all chunks for this document
     results = index.query(
-        vector=[0.0] * 1536,  # Dummy vector, we're using filter
+        vector=[0.0] * 1024,  # Dummy vector, we're using filter
         top_k=1000,  # Get all chunks
         namespace=namespace,
         filter={"doc_id": {"$eq": doc_id}},
@@ -272,7 +272,7 @@ def get_namespace_for_source(source: str, repo_name: str | None = None) -> str:
         return pinecone.NAMESPACES["github_notes"]
     elif source == "github_repos":
         return pinecone.NAMESPACES["github_repos"]
-    elif source == "website_rogerink":
-        return pinecone.NAMESPACES["website_rogerink"]
+    elif source == "website_roger_ink":
+        return pinecone.NAMESPACES["website_roger_ink"]
     else:
         return source  # Use source directly as namespace

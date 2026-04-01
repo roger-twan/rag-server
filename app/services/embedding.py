@@ -2,10 +2,11 @@ from langchain_openai import OpenAIEmbeddings
 
 from app.core.config import settings
 
-# Initialize OpenAI embeddings with text-embedding-3-small (1536 dimensions)
+# Initialize OpenAI embeddings with text-embedding-3-small
 embeddings = OpenAIEmbeddings(
     model="text-embedding-3-small",
     api_key=settings.OPENAI_API_KEY,
+    dimensions=1024,  # 1024 dimensions to match index
 )
 
 

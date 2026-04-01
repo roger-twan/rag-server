@@ -28,7 +28,7 @@ flowchart LR
     end
 
     subgraph VectorDB["Pinecone Vector DB"]
-        DENSE[("Dense Vectors<br/>1536d)]
+        DENSE[("Dense Vectors<br/>1024d)]
         SPARSE[("Sparse Vectors<br/>BM25)]
     end
 
@@ -65,7 +65,7 @@ flowchart LR
 
 ### Vector Database & Search
 - **Pinecone** - Managed vector database with hybrid search
-  - Dense vectors: OpenAI `text-embedding-3-small` (1536d)
+  - Dense vectors: OpenAI `text-embedding-3-small` (1024d)
   - Sparse vectors: BM25 encoding for keyword search
 
 ### LLM & Embeddings
@@ -117,7 +117,7 @@ else:
 
 ```python
 # Dense vector from OpenAI embeddings
-embedding = embed_text(chunk)  # 1536 dimensions
+embedding = embed_text(chunk)
 
 # Sparse vector from BM25 keyword encoding  
 sparse_vector = bm25_encoder.encode_queries(chunk)

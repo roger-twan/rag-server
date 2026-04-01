@@ -140,7 +140,7 @@ class TestDeleteSingleDocument:
         ) as mock_delete:
             mock_delete.return_value = {"status": "deleted", "chunks_deleted": 1}
 
-            await delete_single_document("website_rogerink", "/about")
+            await delete_single_document("website_roger_ink", "/about")
 
             call_args = mock_delete.call_args
-            assert call_args[0][1] == "website_rogerink"
+            assert call_args[0][1] == "website_roger_ink"
