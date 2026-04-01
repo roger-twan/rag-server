@@ -1,12 +1,11 @@
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from llama_index.core import Document
 
-from app.db.pinecone import NAMESPACES, encode_sparse, get_pinecone_index, upsert_vectors
-from app.services.chunker import chunk_text
-from app.services.embedding import embed_content
+from app.db import pinecone
+from app.services import chunker, embedding
 
 
 def compute_doc_id(source: str, path: str) -> str:
@@ -46,16 +45,16 @@ async def prepare_vectors(
         doc_hash = compute_content_hash(text)
 
         # Chunk the text
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
+        chunks = chunker.chunk_text(text, chunk_size, chunk_overlap)
 
         # Create embeddings for chunks (async call)
-        chunk_embeddings = await embed_content(chunks)
+        chunk_embeddings = await embedding.embed_content(chunks)
 
         # Create sparse vectors for chunks
-        sparse_vectors = encode_sparse(chunks)
+        sparse_vectors = pinecone.encode_sparse(chunks)
 
         for idx, chunk in enumerate(chunks):
-            embedding = chunk_embeddings[idx]
+            embedding_values = chunk_embeddings[idx]
             sparse_vector = sparse_vectors[idx] if idx < len(sparse_vectors) else None
 
             # Deterministic ID: doc_id + chunk_index
@@ -67,7 +66,7 @@ async def prepare_vectors(
             # Build vector dict
             vector = {
                 "id": point_id,
-                "values": embedding,
+                "values": embedding_values,
                 "metadata": {
                     "text": chunk,
                     "doc_id": doc_id,  # Track parent document
@@ -75,7 +74,7 @@ async def prepare_vectors(
                     "chunk_hash": chunk_hash,  # Chunk-level hash
                     "chunk_index": idx,
                     "total_chunks": len(chunks),
-                    "last_updated": datetime.now(datetime.timezone.utc).isoformat(),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
                     **metadata,
                 },
             }
@@ -105,7 +104,7 @@ async def index_documents(
     Returns:
         Dict with indexing statistics
     """
-    index = get_pinecone_index()
+    index = pinecone.get_pinecone_index()
 
     # Clear existing vectors if requested
     if clear_existing:
@@ -126,7 +125,7 @@ async def index_documents(
     batch_size = 100
     for i in range(0, len(vectors), batch_size):
         batch = vectors[i : i + batch_size]
-        upsert_vectors(batch, namespace)
+        pinecone.upsert_vectors(batch, namespace)
 
     return {
         "namespace": namespace,
@@ -138,54 +137,44 @@ async def index_documents(
 
 async def get_document_chunks(doc_id: str, namespace: str) -> list[dict]:
     """
-    Query all chunks belonging to a specific document.
+    Query Pinecone for all chunks belonging to a document.
 
     Args:
-        doc_id: Document ID to query
-        namespace: Pinecone namespace
+        doc_id: The document ID to query for
+        namespace: The Pinecone namespace to query
 
     Returns:
-        List of chunk metadata
+        List of chunk dictionaries with id, metadata, etc.
     """
-    index = get_pinecone_index()
+    index = pinecone.get_pinecone_index()
 
-    # Query with filter for doc_id
+    # Query with doc_id filter to get all chunks for this document
     results = index.query(
-        vector=[0.0] * 1536,  # Dummy vector
-        top_k=100,
+        vector=[0.0] * 1536,  # Dummy vector, we're using filter
+        top_k=1000,  # Get all chunks
         namespace=namespace,
         filter={"doc_id": {"$eq": doc_id}},
         include_metadata=True,
     )
 
-    return [
-        {
-            "id": match.id,
-            "score": match.score,
-            "metadata": match.metadata,
-        }
-        for match in results.matches
-    ]
+    return [{"id": match.id, "metadata": match.metadata} for match in results.matches]
 
 
 async def delete_document(doc_id: str, namespace: str) -> dict[str, Any]:
     """
-    Delete all chunks for a specific document.
+    Delete all chunks for a document from Pinecone.
 
     Args:
-        doc_id: Document ID to delete
-        namespace: Pinecone namespace
+        doc_id: The document ID to delete
+        namespace: The Pinecone namespace
 
     Returns:
-        Dict with deletion statistics
+        Dict with deletion status
     """
-    index = get_pinecone_index()
+    # Get all chunks for this document
+    existing_chunks = await get_document_chunks(doc_id, namespace)
 
-    # Find all chunks for this document
-    chunks = await get_document_chunks(doc_id, namespace)
-    ids_to_delete = [chunk["id"] for chunk in chunks]
-
-    if not ids_to_delete:
+    if not existing_chunks:
         return {
             "doc_id": doc_id,
             "namespace": namespace,
@@ -194,6 +183,8 @@ async def delete_document(doc_id: str, namespace: str) -> dict[str, Any]:
         }
 
     # Delete by IDs
+    ids_to_delete = [chunk["id"] for chunk in existing_chunks]
+    index = pinecone.get_pinecone_index()
     index.delete(ids=ids_to_delete, namespace=namespace)
 
     return {
@@ -219,7 +210,7 @@ async def upsert_documents(
     Returns:
         Dict with upsert statistics
     """
-    index = get_pinecone_index()
+    index = pinecone.get_pinecone_index()
 
     updated = 0
     unchanged = 0
@@ -252,28 +243,25 @@ async def upsert_documents(
 
         # Insert new chunks
         vectors = await prepare_vectors([doc])
-        upsert_vectors(vectors, namespace)
+        pinecone.upsert_vectors(vectors, namespace)
         updated += 1
+
+    # Calculate total chunks after all updates
+    total_chunks = 0
+    for d in documents:
+        doc_id = compute_doc_id(
+            d.metadata.get("source", "unknown"),
+            d.metadata.get("path") or d.metadata.get("repo") or d.metadata.get("url", "unknown"),
+        )
+        chunks = await get_document_chunks(doc_id, namespace)
+        total_chunks += len(chunks)
 
     return {
         "namespace": namespace,
         "documents_updated": updated,
         "documents_unchanged": unchanged,
         "chunks_deleted": deleted,
-        "total_chunks": sum(
-            len(
-                await get_document_chunks(
-                    compute_doc_id(
-                        d.metadata.get("source", "unknown"),
-                        d.metadata.get("path")
-                        or d.metadata.get("repo")
-                        or d.metadata.get("url", "unknown"),
-                    ),
-                    namespace,
-                )
-            )
-            for d in documents
-        ),
+        "total_chunks": total_chunks,
         "status": "success",
     }
 
@@ -281,10 +269,10 @@ async def upsert_documents(
 def get_namespace_for_source(source: str, repo_name: str | None = None) -> str:
     """Get the appropriate Pinecone namespace for a data source."""
     if source == "github_notes":
-        return NAMESPACES["github_notes"]
+        return pinecone.NAMESPACES["github_notes"]
     elif source == "github_repos":
-        return NAMESPACES["github_repos"]
+        return pinecone.NAMESPACES["github_repos"]
     elif source == "website_rogerink":
-        return NAMESPACES["website_rogerink"]
+        return pinecone.NAMESPACES["website_rogerink"]
     else:
         return source  # Use source directly as namespace

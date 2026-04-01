@@ -1,12 +1,6 @@
 from llama_index.core import Document
 
-from app.indexers.vector_indexer import (
-    compute_doc_id,
-    delete_document,
-    get_namespace_for_source,
-    index_documents,
-    upsert_documents,
-)
+from app.indexers import vector_indexer
 
 
 async def ingest_document(
@@ -29,10 +23,10 @@ async def ingest_document(
     document = Document(text=content, metadata=metadata)
 
     # Get namespace for source
-    namespace = get_namespace_for_source(source)
+    namespace = vector_indexer.get_namespace_for_source(source)
 
     # Use smart upsert (only updates if content changed)
-    result = await upsert_documents(
+    result = await vector_indexer.upsert_documents(
         documents=[document],
         namespace=namespace,
     )
@@ -56,18 +50,18 @@ async def ingest_documents_batch(
     Returns:
         Dict with batch ingestion statistics
     """
-    namespace = get_namespace_for_source(source)
+    namespace = vector_indexer.get_namespace_for_source(source)
 
     if clear_existing:
         # Use traditional index with clearing
-        result = await index_documents(
+        result = await vector_indexer.index_documents(
             documents=documents,
             namespace=namespace,
             clear_existing=True,
         )
     else:
         # Use smart upsert (only updates changed documents)
-        result = await upsert_documents(
+        result = await vector_indexer.upsert_documents(
             documents=documents,
             namespace=namespace,
         )
@@ -89,8 +83,8 @@ async def delete_single_document(
     Returns:
         Dict with deletion statistics
     """
-    namespace = get_namespace_for_source(source)
-    doc_id = compute_doc_id(source, path)
+    namespace = vector_indexer.get_namespace_for_source(source)
+    doc_id = vector_indexer.compute_doc_id(source, path)
 
-    result = await delete_document(doc_id, namespace)
+    result = await vector_indexer.delete_document(doc_id, namespace)
     return result

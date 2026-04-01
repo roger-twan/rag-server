@@ -249,16 +249,16 @@ class AllReposLoader:
     def _parse_build_gradle(content: str) -> list[str]:
         """Parse Gradle build.gradle and extract dependencies."""
         deps = []
-        # Match implementation/compile/api dependencies
+        # Match implementation/compile/api/testImplementation etc. dependencies
+        # Pattern captures only the group ID (first part before colon)
         patterns = [
-            r"implementation\s+['\"]([^:]+):([^:]+)['\"]",
-            r"compile\s+['\"]([^:]+):([^:]+)['\"]",
-            r"api\s+['\"]([^:]+):([^:]+)['\"]",
+            r"(?:test)?[Ii]mplementation\s+[\'\"]([^:]+):",
+            r"(?:test)?[Cc]ompile\s+[\'\"]([^:]+):",
+            r"(?:test)?[Aa]pi\s+[\'\"]([^:]+):",
         ]
         for pattern in patterns:
             matches = re.findall(pattern, content)
-            for match in matches:
-                deps.append(match[0])  # Group ID
+            deps.extend(matches)
         return deps
 
     @staticmethod
@@ -279,21 +279,31 @@ class AllReposLoader:
     def _parse_pyproject_toml(content: str) -> list[str]:
         """Parse Python pyproject.toml and extract dependencies."""
         deps = []
-        # Match dependencies in [tool.poetry.dependencies] or [project.dependencies]
+        # Match dependencies in [tool.poetry.dependencies] or [project] with dependencies key
         in_deps_section = False
+        section_type = None
         for line in content.split("\n"):
             line = line.strip()
-            if line.startswith("[tool.poetry.dependencies]") or line.startswith(
-                "[project.dependencies]"
-            ):
+            if line.startswith("[tool.poetry.dependencies]"):
                 in_deps_section = True
+                section_type = "poetry"
+                continue
+            if line == "[project]":
+                in_deps_section = True
+                section_type = "project"
                 continue
             if in_deps_section:
                 if line.startswith("["):
                     break
-                match = re.match(r"^([a-zA-Z0-9_-]+)\s*=", line)
-                if match and match.group(1) != "python":
-                    deps.append(match.group(1))
+                if section_type == "poetry":
+                    match = re.match(r'^([a-zA-Z0-9_-]+)\s*[=<>"\',]', line)
+                    if match and match.group(1) != "python":
+                        deps.append(match.group(1))
+                elif section_type == "project":
+                    # Handle array format: "flask>=2.0.0",
+                    match = re.match(r'^["\']([a-zA-Z0-9_-]+)', line)
+                    if match:
+                        deps.append(match.group(1))
         return deps
 
     @staticmethod
@@ -333,26 +343,70 @@ class AllReposLoader:
         """Parse Flutter pubspec.yaml and extract dependencies."""
         deps = []
         in_deps = False
+        current_indent = 0
+        last_package_name = None
         for line in content.split("\n"):
-            line = line.strip()
-            if line == "dependencies:":
-                in_deps = True
+            # Skip empty lines but track position
+            if not line.strip():
                 continue
-            if line == "dev_dependencies:":
+
+            # Calculate indent
+            indent = len(line) - len(line.lstrip())
+            stripped = line.strip()
+
+            # Check for section start
+            if stripped == "dependencies:":
                 in_deps = True
+                current_indent = indent
+                last_package_name = None
                 continue
+            if stripped == "dev_dependencies:":
+                in_deps = True
+                current_indent = indent
+                last_package_name = None
+                continue
+
             if in_deps:
-                if not line or line.startswith("#"):
-                    continue
-                # Check if we've moved to another section
-                if ":" in line and not line.startswith("-"):
-                    key = line.split(":")[0].strip()
-                    if key not in ["dependencies", "dev_dependencies"]:
+                # Check if we've moved to another top-level section
+                if ":" in line and not stripped.startswith("-"):
+                    key = stripped.split(":")[0].strip()
+                    # If same indent as dependencies section, it's a new section
+                    if indent <= current_indent and key not in [
+                        "dependencies",
+                        "dev_dependencies",
+                    ]:
                         in_deps = False
                         continue
-                match = re.match(r"^([a-zA-Z0-9_-]+):", line)
+
+                # Skip comments
+                if stripped.startswith("#"):
+                    continue
+
+                # Check if this is a package entry at dependencies section level + 2
+                if indent == current_indent + 2 and ":" in stripped:
+                    # This is a new package entry
+                    match = re.match(r"^([a-zA-Z0-9_-]+):", stripped)
+                    if match:
+                        pkg_name = match.group(1)
+                        last_package_name = pkg_name
+                        # Skip flutter package
+                        if pkg_name == "flutter":
+                            continue
+                elif indent > current_indent + 2 and last_package_name:
+                    # This is a nested property under a package
+                    # Check if it's sdk: flutter pattern
+                    if "sdk:" in stripped and "flutter" in stripped:
+                        # Remove the parent package if it was added
+                        if last_package_name in deps:
+                            deps.remove(last_package_name)
+                        continue
+
+                # Match dependency lines like "  http: ^0.13.0" (simple value, not nested)
+                match = re.match(r"^([a-zA-Z0-9_-]+):\s*[^\s:]", stripped)
                 if match and match.group(1) != "flutter":
-                    deps.append(match.group(1))
+                    pkg_name = match.group(1)
+                    if pkg_name not in deps:
+                        deps.append(pkg_name)
         return deps
 
     @staticmethod
