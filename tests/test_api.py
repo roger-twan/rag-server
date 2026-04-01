@@ -136,6 +136,48 @@ class TestIngestGithubReposEndpoint:
             assert data["details"]["documents_updated"] == 5
 
 
+class TestIngestNotesEndpoint:
+    """Tests for notes repo ingestion endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_triggers_notes_sync(self):
+        """Test that endpoint triggers notes repo sync."""
+        with patch("app.api.routes.sync_notes", new_callable=AsyncMock) as mock_sync:
+            mock_sync.return_value = {
+                "status": "success",
+                "source": "github_notes",
+                "message": "Re-indexed 5 documents with 25 chunks",
+            }
+
+            response = client.post("/api/ingest/notes")
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "success"
+            mock_sync.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_sync_result(self):
+        """Test that endpoint returns sync statistics."""
+        with patch("app.api.routes.sync_notes", new_callable=AsyncMock) as mock_sync:
+            mock_sync.return_value = {
+                "status": "success",
+                "source": "github_notes",
+                "message": "Re-indexed 3 documents with 15 chunks",
+                "details": {
+                    "documents_updated": 3,
+                    "documents_unchanged": 0,
+                    "total_chunks": 15,
+                },
+            }
+
+            response = client.post("/api/ingest/notes")
+
+            data = response.json()
+            assert data["status"] == "success"
+            assert "details" in data
+            assert data["details"]["total_chunks"] == 15
+
+
 class TestWebhookEndpoint:
     """Tests for GitHub webhook endpoint."""
 

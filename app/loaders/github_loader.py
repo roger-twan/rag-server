@@ -11,9 +11,10 @@ import re
 
 import httpx
 from llama_index.core import Document
-from llama_index.readers.github import GithubClient, GithubRepositoryReader
+from llama_index.readers.github import GithubClient
 
 from app.core.config import settings
+from app.utils.frontmatter_parser import extract_blog_metadata
 
 # Initialize GitHub client
 github_client = GithubClient(github_token=settings.GITHUB_TOKEN)
@@ -34,32 +35,106 @@ class NotesRepoLoader:
 
     @staticmethod
     def load_documents() -> list[Document]:
-        """Load documents from notes repo."""
-        reader = GithubRepositoryReader(
-            github_client=github_client,
-            owner=GITHUB_OWNER,
-            repo=NotesRepoLoader.REPO_NAME,
-            filter_directories=(
-                NotesRepoLoader.DIRECTORIES,
-                GithubRepositoryReader.FilterType.INCLUDE,
-            ),
-            filter_file_paths=(
-                NotesRepoLoader.FILES,
-                GithubRepositoryReader.FilterType.INCLUDE,
-            ),
-        )
+        """Load documents from notes repo using GitHub API directly."""
+        # Get tree of all files in repo
+        import base64
 
-        documents = reader.load_data(branch="main")
+        import httpx
 
-        # Add metadata
-        for doc in documents:
-            doc.metadata.update(
-                {
-                    "source": "github_notes",
-                    "repo": NotesRepoLoader.REPO_NAME,
-                    "owner": GITHUB_OWNER,
-                }
-            )
+        documents = []
+
+        # Recursively get all files from Portfolio/ and Technical/ directories
+        dirs_to_load = ["Portfolio", "Technical"]
+        all_files = []
+
+        with httpx.Client() as client:
+            for dir_name in dirs_to_load:
+                try:
+                    # List contents of directory
+                    response = client.get(
+                        f"https://api.github.com/repos/{GITHUB_OWNER}/{NotesRepoLoader.REPO_NAME}/contents/{dir_name}",
+                        headers={
+                            "Authorization": f"token {settings.GITHUB_TOKEN}",
+                            "Accept": "application/vnd.github.v3+json",
+                        },
+                    )
+                    if response.status_code == 200:
+                        items = response.json()
+                        for item in items:
+                            if (
+                                item["type"] == "file"
+                                and item["name"].endswith(".md")
+                                and not item["name"].endswith("_index.md")
+                            ):
+                                all_files.append(item["path"])
+                except Exception as e:
+                    logger.warning(f"Failed to list directory {dir_name}: {e}")
+
+            # Also get Skills.md from root
+            try:
+                response = client.get(
+                    f"https://api.github.com/repos/{GITHUB_OWNER}/{NotesRepoLoader.REPO_NAME}/contents/Skills.md",
+                    headers={
+                        "Authorization": f"token {settings.GITHUB_TOKEN}",
+                        "Accept": "application/vnd.github.v3+json",
+                    },
+                )
+                if response.status_code == 200:
+                    all_files.append("Skills.md")
+            except Exception as e:
+                logger.warning(f"Skills.md not found: {e}")
+
+            # Load each file content
+            for file_path in all_files:
+                try:
+                    response = client.get(
+                        f"https://api.github.com/repos/{GITHUB_OWNER}/{NotesRepoLoader.REPO_NAME}/contents/{file_path}",
+                        headers={
+                            "Authorization": f"token {settings.GITHUB_TOKEN}",
+                            "Accept": "application/vnd.github.v3+json",
+                        },
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        if isinstance(data, dict) and "content" in data:
+                            content = base64.b64decode(data["content"]).decode("utf-8")
+
+                            # Extract metadata
+                            blog_meta = extract_blog_metadata(content, file_path)
+
+                            # Skip if not published (publish: true) - only for Technical directory
+                            if file_path.startswith("Technical/") and not blog_meta.get(
+                                "publish", False
+                            ):
+                                logger.info(f"Skipped (not published): {file_path}")
+                                continue
+
+                            from app.utils.frontmatter_parser import parse_frontmatter
+
+                            _, body = parse_frontmatter(content)
+
+                            doc = Document(
+                                text=body,
+                                metadata={
+                                    "source": "github_notes",
+                                    "repo": NotesRepoLoader.REPO_NAME,
+                                    "owner": GITHUB_OWNER,
+                                    "path": file_path,
+                                    "title": blog_meta.get("title", "") or "",
+                                    "date": blog_meta.get("date", "") or "",
+                                    "tags": ", ".join(blog_meta.get("tags") or []),
+                                    "description": blog_meta.get("description", "") or "",
+                                    "category": blog_meta.get("category", "") or "",
+                                    "author": blog_meta.get("author", "") or "",
+                                },
+                            )
+                            documents.append(doc)
+                            logger.info(f"Loaded: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load {file_path}: {e}")
+
+        if not documents:
+            logger.warning("No documents found in notes repo")
 
         return documents
 

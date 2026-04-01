@@ -2,10 +2,11 @@
 Sync jobs for manual ingestion of website and all GitHub repos.
 """
 
+import asyncio
 import logging
 from typing import Any
 
-from app.loaders.github_loader import AllReposLoader
+from app.loaders.github_loader import AllReposLoader, NotesRepoLoader
 from app.loaders.website_loader import load_website_documents
 from app.services.ingestion import ingest_documents_batch
 
@@ -111,4 +112,53 @@ async def sync_all_github_repos() -> dict[str, Any]:
             "status": "error",
             "source": "github_repos",
             "message": f"Failed to sync: {type(e).__name__}: {str(e)}",
+        }
+
+
+async def sync_notes() -> dict[str, Any]:
+    """
+    Manually sync notes repo (blog) to Pinecone.
+    Loads Portfolio, Technical directories and Skills.md, then re-indexes.
+
+    Returns:
+        Dict with sync statistics
+    """
+    logger.info("Starting notes repo sync...")
+
+    try:
+        # Load documents from notes repo (run sync loader in thread pool)
+        documents = await asyncio.to_thread(NotesRepoLoader.load_documents)
+
+        if not documents:
+            logger.warning("No documents found in notes repo")
+            return {
+                "status": "no_data",
+                "source": "github_notes",
+                "message": "No documents found to index",
+            }
+
+        # Index documents using smart upsert (only updates changed docs)
+        result = await ingest_documents_batch(
+            documents=documents,
+            source="github_notes",
+            clear_existing=False,  # Smart upsert - only updates changed docs
+        )
+
+        logger.info(
+            f"Successfully synced notes repo: {result.get('total_chunks', 0)} chunks from {result.get('documents_updated', result.get('documents_indexed', 0))} documents"
+        )
+
+        return {
+            "status": "success",
+            "source": "github_notes",
+            "message": f"Re-indexed {result.get('documents_updated', result.get('documents_indexed', 0))} documents with {result.get('total_chunks', 0)} chunks",
+            "details": result,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to sync notes repo: {e}")
+        return {
+            "status": "error",
+            "source": "github_notes",
+            "message": f"Failed to sync: {str(e)}",
         }

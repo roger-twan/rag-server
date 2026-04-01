@@ -176,6 +176,35 @@ delete_document("a3f9b2c1d8e7", "github_repos")  # Only that repo
 chunks = await get_document_chunks(doc_id, namespace)
 ```
 
+### 5. Markdown Blog Post Optimization
+
+Special handling for blog posts in the notes repo:
+
+**Frontmatter Parsing:**
+- Extracts YAML metadata (`title`, `date`, `tags`, `description`, `publish`)
+- Supports Obsidian-style frontmatter format
+
+**Semantic Header-Based Chunking:**
+- Splits by Markdown headers (`#`, `##`, `###`) instead of fixed size
+- Preserves document structure and context
+- Merges small sections, splits large ones at paragraph boundaries
+
+**Context Enrichment for Embeddings:**
+```
+Document: My Blog Title
+Section: Technical > Python
+Subsection: Async Programming
+
+[actual content...]
+```
+
+**Publish Filter (Technical Directory Only):**
+- Only ingests posts with `publish: true` in frontmatter
+- Portfolio/Skills.md are ingested regardless of publish flag
+
+**Ignored Files:**
+- `_index.md` files are excluded from ingestion
+
 ## Project Structure
 
 ```
@@ -220,6 +249,7 @@ rag-server/
 | GET | `/api/query?q={question}` | Query RAG system |
 | POST | `/api/ingest/website` | Sync website content |
 | POST | `/api/ingest/github-all-repos` | Sync all GitHub repos |
+| POST | `/api/ingest/notes` | Sync notes repo (blog) manually |
 | POST | `/api/webhooks/github` | GitHub push webhook |
 
 ## Setup

@@ -6,6 +6,7 @@ from llama_index.core import Document
 
 from app.db import pinecone
 from app.services import chunker, embedding
+from app.services.markdown_chunker import chunk_markdown_document
 
 
 def compute_doc_id(source: str, path: str) -> str:
@@ -21,6 +22,27 @@ def compute_content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def sanitize_metadata_for_pinecone(metadata: dict) -> dict:
+    """
+    Sanitize metadata for Pinecone compatibility.
+    Pinecone only supports string, number, and boolean values.
+    Converts None to empty string, lists to comma-separated strings.
+    """
+    sanitized = {}
+    for key, value in metadata.items():
+        if value is None:
+            sanitized[key] = ""
+        elif isinstance(value, list):
+            sanitized[key] = ", ".join(str(v) for v in value)
+        elif isinstance(value, bool):
+            sanitized[key] = value  # Booleans are fine
+        elif isinstance(value, (int, float)):
+            sanitized[key] = value  # Numbers are fine
+        else:
+            sanitized[key] = str(value)  # Convert everything else to string
+    return sanitized
+
+
 async def prepare_vectors(
     documents: list[Document],
     chunk_size: int = 500,
@@ -28,58 +50,67 @@ async def prepare_vectors(
 ) -> list[dict]:
     """
     Convert LlamaIndex documents to Pinecone vectors with doc_id tracking.
-    Chunks documents, creates embeddings (dense + sparse), returns vector dicts.
-    Each chunk gets a deterministic ID based on doc_id + chunk_index.
+    Uses markdown-aware chunking for blog posts, simple chunking for others.
     """
     vectors = []
 
     for doc in documents:
-        # Get text content
         text = doc.text
         metadata = doc.metadata or {}
-
-        # Generate doc_id from source and path (or repo)
         source = metadata.get("source", "unknown")
         path = metadata.get("path") or metadata.get("repo") or metadata.get("url", "unknown")
         doc_id = compute_doc_id(source, path)
         doc_hash = compute_content_hash(text)
 
-        # Chunk the text
-        chunks = chunker.chunk_text(text, chunk_size, chunk_overlap)
+        # Choose chunking strategy based on source
+        if source == "github_notes":
+            # Use markdown-aware chunking for blog posts
+            document_title = metadata.get("title", "")
+            chunk_data_list = chunk_markdown_document(
+                text=text,
+                document_title=document_title,
+                min_chunk_size=200,
+                max_chunk_size=1500,
+                enrich_context=True,
+            )
+            chunks = [c["text"] for c in chunk_data_list]
+            chunk_metadata_list = [c["metadata"] for c in chunk_data_list]
+        else:
+            # Use simple chunking for other sources
+            chunks = chunker.chunk_text(text, chunk_size, chunk_overlap)
+            chunk_metadata_list = [{} for _ in chunks]
 
-        # Create embeddings for chunks (async call)
+        # Create embeddings
         chunk_embeddings = await embedding.embed_content(chunks)
-
-        # Create sparse vectors for chunks
         sparse_vectors = pinecone.encode_sparse(chunks)
 
         for idx, chunk in enumerate(chunks):
             embedding_values = chunk_embeddings[idx]
             sparse_vector = sparse_vectors[idx] if idx < len(sparse_vectors) else None
-
-            # Deterministic ID: doc_id + chunk_index
             point_id = f"{doc_id}_{idx}"
-
-            # Compute chunk hash
             chunk_hash = compute_content_hash(chunk)
+            chunk_meta = chunk_metadata_list[idx]
 
-            # Build vector dict
+            # Sanitize metadata for Pinecone compatibility
+            clean_metadata = sanitize_metadata_for_pinecone(metadata)
+            clean_chunk_meta = sanitize_metadata_for_pinecone(chunk_meta)
+
             vector = {
                 "id": point_id,
                 "values": embedding_values,
                 "metadata": {
-                    "text": chunk,
-                    "doc_id": doc_id,  # Track parent document
-                    "doc_hash": doc_hash,  # Full document content hash
-                    "chunk_hash": chunk_hash,  # Chunk-level hash
+                    "text": chunk[:2000],  # Truncate to avoid metadata size limit
+                    "doc_id": doc_id,
+                    "doc_hash": doc_hash,
+                    "chunk_hash": chunk_hash,
                     "chunk_index": idx,
                     "total_chunks": len(chunks),
                     "last_updated": datetime.now(timezone.utc).isoformat(),
-                    **metadata,
+                    **clean_metadata,
+                    **clean_chunk_meta,
                 },
             }
 
-            # Add sparse vector if available
             if sparse_vector:
                 vector["sparse_values"] = sparse_vector
 
