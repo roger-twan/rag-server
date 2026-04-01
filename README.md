@@ -219,7 +219,7 @@ rag-server/
 | GET | `/` | Health check |
 | GET | `/api/query?q={question}` | Query RAG system |
 | POST | `/api/ingest/website` | Sync website content |
-| POST | `/api/ingest/github-repos` | Sync all GitHub repos |
+| POST | `/api/ingest/github-all-repos` | Sync all GitHub repos |
 | POST | `/api/webhooks/github` | GitHub push webhook |
 
 ## Setup
@@ -300,3 +300,10 @@ pre-commit run --all-files
 4. **pytest** - Full test suite
 
 All checks must pass before merging to `main`.
+
+## TODO
+- [ ] Add request rate limiting and authentication
+- [ ] Support sync specific GitHub repos
+- [ ] Complete sync blog by GitHub Push Webhook
+- [ ] Add chat memory
+- [ ] Add evaluation strategy

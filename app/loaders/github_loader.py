@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import re
 
 import httpx
@@ -16,6 +17,9 @@ from app.core.config import settings
 
 # Initialize GitHub client
 github_client = GithubClient(github_token=settings.GITHUB_TOKEN)
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Owner for all repos
 GITHUB_OWNER = "roger-twan"
@@ -68,19 +72,31 @@ class AllReposLoader:
     @staticmethod
     async def fetch_repo_list() -> list[dict]:
         """Fetch list of all repos for the owner."""
+        all_repos = []
+        page = 1
+        per_page = 100  # Max 100 per page
+
         async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.github.com/users/{GITHUB_OWNER}/repos",
-                headers={
-                    "Authorization": f"token {settings.GITHUB_TOKEN}",
-                    "Accept": "application/vnd.github.v3+json",
-                },
-            )
-            response.raise_for_status()
-            repos = response.json()
+            while True:
+                response = await client.get(
+                    f"https://api.github.com/users/{GITHUB_OWNER}/repos",
+                    params={"per_page": per_page, "page": page},
+                    headers={
+                        "Authorization": f"token {settings.GITHUB_TOKEN}",
+                        "Accept": "application/vnd.github.v3+json",
+                    },
+                )
+                response.raise_for_status()
+                repos = response.json()
+                all_repos.extend(repos)
+
+                # If we got less than per_page repos, we've reached the end
+                if len(repos) < per_page:
+                    break
+                page += 1
 
         # Filter out the notes repo
-        return [repo for repo in repos if repo["name"] != AllReposLoader.EXCLUDED_REPO]
+        return [repo for repo in all_repos if repo["name"] != AllReposLoader.EXCLUDED_REPO]
 
     @staticmethod
     async def fetch_file_content(repo: str, path: str) -> str | None:
@@ -121,9 +137,6 @@ class AllReposLoader:
 
         # Try to fetch README
         readme_content = await AllReposLoader.fetch_file_content(repo_name, "README.md")
-        if not readme_content:
-            # Try without extension
-            readme_content = await AllReposLoader.fetch_file_content(repo_name, "README")
 
         if readme_content:
             sections.append(f"\n## README\n\n{readme_content}")
@@ -217,6 +230,7 @@ class AllReposLoader:
         full_content = "\n".join(sections)
 
         # Create document
+        language = repo.get("language")
         document = Document(
             text=full_content,
             metadata={
@@ -224,8 +238,8 @@ class AllReposLoader:
                 "repo": repo_name,
                 "owner": GITHUB_OWNER,
                 "url": repo.get("html_url", ""),
-                "language": repo.get("language", ""),
-                "stars": repo.get("stargazers_count", 0),
+                "language": language if language is not None else "",
+                "stars": repo.get("stargazers_count", 0) or 0,
             },
         )
 
@@ -413,13 +427,30 @@ class AllReposLoader:
     async def load_all_documents() -> list[Document]:
         """Load documents for all repos except notes."""
         repos = await AllReposLoader.fetch_repo_list()
+        total_repos = len(repos)
         documents = []
 
-        for repo in repos:
-            doc = await AllReposLoader.load_repo_document(repo)
-            if doc:
-                documents.append(doc)
+        logger.info(f"Starting to load {total_repos} GitHub repos...")
 
+        for index, repo in enumerate(repos, 1):
+            repo_name = repo.get("name", "unknown")
+            try:
+                logger.info(f"[{index}/{total_repos}] Loading repo: {repo_name}...")
+                doc = await AllReposLoader.load_repo_document(repo)
+                if doc:
+                    documents.append(doc)
+                    logger.info(f"[{index}/{total_repos}] Loaded repo: {repo_name}")
+                else:
+                    logger.info(f"[{index}/{total_repos}] Skipped repo: {repo_name} (no content)")
+            except Exception as e:
+                logger.warning(
+                    f"[{index}/{total_repos}] Failed to load repo {repo_name}: {type(e).__name__}: {e}"
+                )
+                continue
+
+        logger.info(
+            f"Completed loading repos: {len(documents)}/{total_repos} repos loaded successfully"
+        )
         return documents
 
 

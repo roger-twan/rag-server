@@ -106,9 +106,9 @@ async def sync_all_github_repos() -> dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Failed to sync GitHub repos: {e}")
+        logger.exception(f"Failed to sync GitHub repos: {type(e).__name__}: {e}")
         return {
             "status": "error",
             "source": "github_repos",
-            "message": f"Failed to sync: {str(e)}",
+            "message": f"Failed to sync: {type(e).__name__}: {str(e)}",
         }

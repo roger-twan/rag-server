@@ -22,7 +22,7 @@ async def ingest_website():
     return result
 
 
-@router.post("/ingest/github-repos")
+@router.post("/ingest/github-all-repos")
 async def ingest_github_repos():
     """
     Batch ingest all GitHub repos (except notes) to Pinecone.

@@ -107,7 +107,7 @@ class TestIngestGithubReposEndpoint:
                 "message": "Synced 10 repos",
             }
 
-            response = client.post("/api/ingest/github-repos")
+            response = client.post("/api/ingest/github-all-repos")
 
             assert response.status_code == 200
             assert response.json()["status"] == "success"
@@ -128,7 +128,7 @@ class TestIngestGithubReposEndpoint:
                 },
             }
 
-            response = client.post("/api/ingest/github-repos")
+            response = client.post("/api/ingest/github-all-repos")
 
             data = response.json()
             assert data["status"] == "success"
