@@ -1,22 +1,48 @@
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.services.retriever import retrieve
 
-# Initialize Gemini model via LangChain
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-pro",
-    google_api_key=settings.GOOGLE_API_KEY,
-    temperature=0.7,
-)
+
+def _get_llm():
+    """Get LLM instance based on configured provider."""
+    provider = settings.LLM_PROVIDER.lower()
+    temperature = 0.7
+
+    if provider == "google":
+        return ChatGoogleGenerativeAI(
+            model="gemini-2.5-pro",
+            google_api_key=settings.GOOGLE_API_KEY,
+            temperature=temperature,
+        )
+    elif provider == "openai":
+        return ChatOpenAI(
+            model="gpt-4o",
+            api_key=settings.OPENAI_API_KEY,
+            temperature=temperature,
+        )
+    elif provider == "deepseek":
+        return ChatDeepSeek(
+            model="deepseek-chat",
+            api_key=settings.DEEPSEEK_API_KEY,
+            temperature=temperature,
+        )
+    else:
+        raise ValueError(f"Unknown LLM_PROVIDER: {settings.LLM_PROVIDER}")
+
+
+# Initialize LLM based on configuration
+llm = _get_llm()
 
 # Create prompt template
 prompt_template = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a helpful assistant. Answer the question based on the provided context.",
+            "Answer questions as yourself, speaking naturally in first person. Use the provided context to inform your answers, but don't mention that you used context or that you're referencing documents. Just speak authentically as a real person would.",
         ),
         (
             "human",
@@ -25,7 +51,7 @@ prompt_template = ChatPromptTemplate.from_messages(
 
 Question: {question}
 
-Provide a clear and concise answer based on the context above.""",
+Answer as yourself:""",
         ),
     ]
 )

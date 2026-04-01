@@ -1,18 +1,8 @@
 from langchain_cohere import CohereRerank
-from langchain_openai import OpenAIEmbeddings
-from pinecone_text.sparse import BM25Encoder
 
 from app.core.config import settings
-from app.db.pinecone import NAMESPACES, get_pinecone_index
-
-# Initialize OpenAI embeddings
-embeddings = OpenAIEmbeddings(
-    model="text-embedding-3-small",
-    api_key=settings.OPENAI_API_KEY,
-)
-
-# Initialize BM25 encoder for sparse vectors
-bm25_encoder = BM25Encoder()
+from app.db.pinecone import NAMESPACES, bm25_encoder, get_pinecone_index
+from app.services.embedding import embeddings
 
 # Initialize Cohere reranker
 cohere_reranker = CohereRerank(
@@ -46,8 +36,11 @@ async def retrieve(
     # Generate dense embedding
     dense_vector = await embeddings.aembed_query(query)
 
-    # Generate sparse vector (BM25)
-    sparse_vector = bm25_encoder.encode_queries(query)
+    # Generate sparse vector (BM25) - skip if encoder not fitted
+    try:
+        sparse_vector = bm25_encoder.encode_queries(query)
+    except ValueError:
+        sparse_vector = None
 
     # Search across all namespaces
     all_results = []
@@ -86,6 +79,15 @@ async def retrieve(
     reranked = cohere_reranker.rerank(query=query, documents=docs)
 
     # Return top reranked documents
-    reranked_texts = [docs[r.index] for r in reranked[:rerank_top_n] if r.relevance_score > 0.1]
+    def _get_attr(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    reranked_texts = [
+        docs[_get_attr(r, "index")]
+        for r in reranked[:rerank_top_n]
+        if _get_attr(r, "relevance_score", 0) > 0.1
+    ]
 
     return reranked_texts

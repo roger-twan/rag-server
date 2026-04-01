@@ -178,10 +178,10 @@ chunks = await get_document_chunks(doc_id, namespace)
 
 ### 5. Markdown Blog Post Optimization
 
-Special handling for blog posts in the notes repo:
+Special handling for markdown blog posts:
 
 **Frontmatter Parsing:**
-- Extracts YAML metadata (`title`, `date`, `tags`, `description`, `publish`)
+- Extracts YAML metadata
 - Supports Obsidian-style frontmatter format
 
 **Semantic Header-Based Chunking:**
@@ -197,13 +197,6 @@ Subsection: Async Programming
 
 [actual content...]
 ```
-
-**Publish Filter (Technical Directory Only):**
-- Only ingests posts with `publish: true` in frontmatter
-- Portfolio/Skills.md are ingested regardless of publish flag
-
-**Ignored Files:**
-- `_index.md` files are excluded from ingestion
 
 ## Project Structure
 
@@ -277,6 +270,7 @@ cp .env.example .env
 # - GOOGLE_API_KEY
 # - GITHUB_TOKEN (for repo loading)
 # - GITHUB_WEBHOOK_SECRET
+# - DEEPSEEK_API_KEY (for DeepSeek LLM)
 ```
 
 ### 3. Install pre-commit hooks

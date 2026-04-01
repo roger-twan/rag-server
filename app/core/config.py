@@ -9,12 +9,14 @@ class Settings(BaseSettings):
 
     ENVIRONMENT: str = "development"
     GITHUB_TOKEN: str
-    GITHUB_WEBHOOK_SECRET: Optional[str] = None
     GOOGLE_API_KEY: str
     OPENAI_API_KEY: str
     COHERE_API_KEY: str
     PINECONE_API_KEY: str
     PINECONE_INDEX_HOST: str
+    LLM_PROVIDER: str = "google"  # "google", "openai", or "deepseek"
+    DEEPSEEK_API_KEY: Optional[str] = None
+    GITHUB_WEBHOOK_SECRET: Optional[str] = None
 
 
 settings = Settings()
