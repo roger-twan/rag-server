@@ -331,3 +331,4 @@ All checks must pass before merging to `main`.
 - [ ] Complete sync blog by GitHub Push Webhook
 - [ ] Add chat memory
 - [ ] Add evaluation strategy
+- [ ] Support streaming responses
