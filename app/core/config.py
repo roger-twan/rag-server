@@ -3,10 +3,13 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
-    QDRANT_URL: str
-    QDRANT_API_KEY: str
     GITHUB_TOKEN: str
-    GEMINI_API_KEY: str
+    GITHUB_WEBHOOK_SECRET: str
+    GOOGLE_API_KEY: str
+    OPENAI_API_KEY: str
+    COHERE_API_KEY: str
+    PINECONE_API_KEY: str
+    PINECONE_INDEX_HOST: str
 
     class Config:
         env_file = ".env"
