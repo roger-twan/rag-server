@@ -34,21 +34,23 @@ async def sync_website() -> dict[str, Any]:
                 "message": "No documents found to index",
             }
 
-        # Index documents (clear existing)
+        # Index documents using smart upsert (only updates changed docs)
         result = await ingest_documents_batch(
             documents=documents,
             source="website_rogerink",
-            clear_existing=True,
+            clear_existing=False,  # Smart upsert - only updates changed docs
         )
 
         logger.info(
-            f"Successfully synced website: {result['total_chunks']} chunks from {result['documents_indexed']} pages"
+            f"Successfully synced website: {result.get('total_chunks', result.get('documents_indexed', 0))} chunks, "
+            f"{result.get('documents_updated', 0)} updated, "
+            f"{result.get('documents_unchanged', 0)} unchanged"
         )
 
         return {
             "status": "success",
             "source": "website_rogerink",
-            "message": f"Synced {result['documents_indexed']} pages with {result['total_chunks']} chunks",
+            "message": f"Synced {result.get('documents_updated', 0)} updated, {result.get('documents_unchanged', 0)} unchanged",
             "details": result,
         }
 
@@ -83,21 +85,23 @@ async def sync_all_github_repos() -> dict[str, Any]:
                 "message": "No documents found to index",
             }
 
-        # Index documents (clear existing)
+        # Index documents using smart upsert (only updates changed repos)
         result = await ingest_documents_batch(
             documents=documents,
             source="github_repos",
-            clear_existing=True,
+            clear_existing=False,  # Smart upsert - only updates changed docs
         )
 
         logger.info(
-            f"Successfully synced GitHub repos: {result['total_chunks']} chunks from {result['documents_indexed']} repos"
+            f"Successfully synced GitHub repos: {result.get('total_chunks', result.get('documents_indexed', 0))} chunks, "
+            f"{result.get('documents_updated', 0)} updated, "
+            f"{result.get('documents_unchanged', 0)} unchanged"
         )
 
         return {
             "status": "success",
             "source": "github_repos",
-            "message": f"Synced {result['documents_indexed']} repos with {result['total_chunks']} chunks",
+            "message": f"Synced {result.get('documents_updated', 0)} updated, {result.get('documents_unchanged', 0)} unchanged",
             "details": result,
         }
 
