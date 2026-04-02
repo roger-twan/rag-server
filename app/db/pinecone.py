@@ -3,8 +3,24 @@ from pinecone_text.sparse import BM25Encoder
 
 from app.core.config import settings
 
-pc = Pinecone(api_key=settings.PINECONE_API_KEY)
-index = pc.Index(host=settings.PINECONE_INDEX_HOST)
+# Lazy initialization - only create client when needed
+_pc = None
+_index = None
+
+
+def _get_pc():
+    global _pc
+    if _pc is None:
+        _pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+    return _pc
+
+
+def _get_index():
+    global _index
+    if _index is None:
+        _index = _get_pc().Index(host=settings.PINECONE_INDEX_HOST)
+    return _index
+
 
 # Initialize BM25 encoder for sparse vectors
 bm25_encoder = BM25Encoder()
@@ -19,12 +35,12 @@ NAMESPACES = {
 
 def get_pinecone_index():
     """Get Pinecone index instance."""
-    return index
+    return _get_index()
 
 
 def clear_namespace(namespace: str):
     """Clear all vectors in a namespace."""
-    index.delete(delete_all=True, namespace=namespace)
+    _get_index().delete(delete_all=True, namespace=namespace)
 
 
 def upsert_vectors(vectors: list[dict], namespace: str):
@@ -32,7 +48,7 @@ def upsert_vectors(vectors: list[dict], namespace: str):
     Upsert vectors to Pinecone.
     Each vector dict should have: id, values (dense), sparse_values (optional), metadata
     """
-    index.upsert(vectors=vectors, namespace=namespace)
+    _get_index().upsert(vectors=vectors, namespace=namespace)
 
 
 def query_hybrid(
@@ -50,7 +66,7 @@ def query_hybrid(
     # If sparse vector provided, use hybrid search
     if sparse_vector:
         # Pinecone's hybrid search using query_vectors parameter
-        result = index.query(
+        result = _get_index().query(
             vector=dense_vector,
             sparse_vector=sparse_vector,
             top_k=top_k,
@@ -60,7 +76,7 @@ def query_hybrid(
         )
     else:
         # Dense-only search
-        result = index.query(
+        result = _get_index().query(
             vector=dense_vector,
             top_k=top_k,
             namespace=namespace,
