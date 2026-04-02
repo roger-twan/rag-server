@@ -1,0 +1,30 @@
+name: CI - Pull Request Checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+      - run: uv pip sync requirements.txt requirements-dev.txt
+      - run: uv run black --check --diff .
+      - run: uv run isort --check-only --diff .
+      - run: uv run flake8 app tests scripts
+      - run: uv run pytest tests/ -v --tb=short
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            pytest-report.xml
+            coverage.xml
+          if-no-files-found: ignore

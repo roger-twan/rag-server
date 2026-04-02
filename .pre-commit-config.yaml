@@ -14,3 +14,12 @@ repos:
     hooks:
       - id: flake8
         language_version: python3
+  - repo: local
+    hooks:
+      - id: pytest-changed
+        name: pytest for changed files
+        entry: .venv/bin/python scripts/run_changed_tests.py
+        language: system
+        pass_filenames: true
+        always_run: true
+        stages: [commit]

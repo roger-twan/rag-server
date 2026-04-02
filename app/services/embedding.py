@@ -1,12 +1,23 @@
-from google.genai import types
+from langchain_openai import OpenAIEmbeddings
 
-from app.utils.gemini_client import gemini_client
+from app.core.config import settings
+
+# Initialize OpenAI embeddings with text-embedding-3-small
+embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-small",
+    api_key=settings.OPENAI_API_KEY,
+    dimensions=1024,  # 1024 dimensions to match index
+)
 
 
 async def embed_content(content: str | list[str]) -> list[list[float]]:
-    response = gemini_client.models.embed_content(
-        model="gemini-embedding-001",
-        contents=content,
-        config=types.EmbedContentConfig(output_dimensionality=1536),
-    )
-    return response.embeddings
+    """
+    Embed content using OpenAI text-embedding-3-small.
+    Returns list of embedding vectors.
+    """
+    if isinstance(content, str):
+        content = [content]
+
+    # LangChain's aembed_documents returns list of embeddings
+    result = await embeddings.aembed_documents(content)
+    return result

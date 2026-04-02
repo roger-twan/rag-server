@@ -1,0 +1,164 @@
+"""
+Sync jobs for manual ingestion of website and all GitHub repos.
+"""
+
+import asyncio
+import logging
+from typing import Any
+
+from app.loaders.github_loader import AllReposLoader, NotesRepoLoader
+from app.loaders.website_loader import load_website_documents
+from app.services.ingestion import ingest_documents_batch
+
+logger = logging.getLogger(__name__)
+
+
+async def sync_website() -> dict[str, Any]:
+    """
+    Manually sync website content (roger.ink).
+    Fetches sitemap, loads all pages, and indexes to Pinecone.
+
+    Returns:
+        Dict with sync statistics
+    """
+    logger.info("Starting website sync for roger.ink...")
+
+    try:
+        # Load website documents
+        documents = await load_website_documents()
+
+        if not documents:
+            logger.warning("No documents found on website")
+            return {
+                "status": "no_data",
+                "source": "website_roger_ink",
+                "message": "No documents found to index",
+            }
+
+        # Index documents using smart upsert (only updates changed docs)
+        result = await ingest_documents_batch(
+            documents=documents,
+            source="website_roger_ink",
+            clear_existing=False,  # Smart upsert - only updates changed docs
+        )
+
+        logger.info(
+            f"Successfully synced website: {result.get('total_chunks', result.get('documents_indexed', 0))} chunks, "
+            f"{result.get('documents_updated', 0)} updated, "
+            f"{result.get('documents_unchanged', 0)} unchanged"
+        )
+
+        return {
+            "status": "success",
+            "source": "website_roger_ink",
+            "message": f"Synced {result.get('documents_updated', 0)} updated, {result.get('documents_unchanged', 0)} unchanged",
+            "details": result,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to sync website: {e}")
+        return {
+            "status": "error",
+            "source": "website_roger_ink",
+            "message": f"Failed to sync: {str(e)}",
+        }
+
+
+async def sync_all_github_repos() -> dict[str, Any]:
+    """
+    Batch sync all GitHub repos (except notes) to Pinecone.
+    For each repo, extracts: description, README, package.json
+
+    Returns:
+        Dict with sync statistics
+    """
+    logger.info("Starting batch sync for all GitHub repos...")
+
+    try:
+        # Load documents from all repos
+        documents = await AllReposLoader.load_all_documents()
+
+        if not documents:
+            logger.warning("No documents found in any repo")
+            return {
+                "status": "no_data",
+                "source": "github_repos",
+                "message": "No documents found to index",
+            }
+
+        # Index documents using smart upsert (only updates changed repos)
+        result = await ingest_documents_batch(
+            documents=documents,
+            source="github_repos",
+            clear_existing=False,  # Smart upsert - only updates changed docs
+        )
+
+        logger.info(
+            f"Successfully synced GitHub repos: {result.get('total_chunks', result.get('documents_indexed', 0))} chunks, "
+            f"{result.get('documents_updated', 0)} updated, "
+            f"{result.get('documents_unchanged', 0)} unchanged"
+        )
+
+        return {
+            "status": "success",
+            "source": "github_repos",
+            "message": f"Synced {result.get('documents_updated', 0)} updated, {result.get('documents_unchanged', 0)} unchanged",
+            "details": result,
+        }
+
+    except Exception as e:
+        logger.exception(f"Failed to sync GitHub repos: {type(e).__name__}: {e}")
+        return {
+            "status": "error",
+            "source": "github_repos",
+            "message": f"Failed to sync: {type(e).__name__}: {str(e)}",
+        }
+
+
+async def sync_notes() -> dict[str, Any]:
+    """
+    Manually sync notes repo (blog) to Pinecone.
+    Loads Portfolio, Technical directories and Skills.md, then re-indexes.
+
+    Returns:
+        Dict with sync statistics
+    """
+    logger.info("Starting notes repo sync...")
+
+    try:
+        # Load documents from notes repo (run sync loader in thread pool)
+        documents = await asyncio.to_thread(NotesRepoLoader.load_documents)
+
+        if not documents:
+            logger.warning("No documents found in notes repo")
+            return {
+                "status": "no_data",
+                "source": "github_notes",
+                "message": "No documents found to index",
+            }
+
+        # Index documents using smart upsert (only updates changed docs)
+        result = await ingest_documents_batch(
+            documents=documents,
+            source="github_notes",
+            clear_existing=False,  # Smart upsert - only updates changed docs
+        )
+
+        logger.info(
+            f"Successfully synced notes repo: {result.get('total_chunks', 0)} chunks from {result.get('documents_updated', result.get('documents_indexed', 0))} documents"
+        )
+
+        return {
+            "status": "success",
+            "source": "github_notes",
+            "message": f"Re-indexed {result.get('documents_updated', result.get('documents_indexed', 0))} documents with {result.get('total_chunks', 0)} chunks",
+            "details": result,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to sync notes repo: {e}")
+        return {
+            "status": "error",
+            "source": "github_notes",
+            "message": f"Failed to sync: {str(e)}",
+        }

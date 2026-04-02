@@ -1,60 +1,90 @@
-import uuid
+from llama_index.core import Document
 
-from qdrant_client.models import PointStruct
-
-from app.db.qdrant_client import qdrant_client
-from app.services.chunker import chunk_text
-from app.services.embedding import embed_content
+from app.indexers import vector_indexer
 
 
 async def ingest_document(
     content: str,
     metadata: dict,
-) -> list[str]:
-    chunks = chunk_text(content)
-    embeddings = await embed_content(chunks)
+    source: str = "default",
+) -> dict:
+    """
+    Ingest a single document to Pinecone with smart upsert.
 
-    points = []
-    point_ids = []
+    Args:
+        content: Document text content
+        metadata: Document metadata (should include 'path' for tracking)
+        source: Data source identifier (github_notes, github_repos, website_roger_ink)
 
-    for idx, chunk in enumerate(chunks):
-        embedding = embeddings[idx]
+    Returns:
+        Dict with ingestion result
+    """
+    # Create LlamaIndex document
+    document = Document(text=content, metadata=metadata)
 
-        point_id = str(uuid.uuid4())
-        point_ids.append(point_id)
+    # Get namespace for source
+    namespace = vector_indexer.get_namespace_for_source(source)
 
-        point = PointStruct(
-            id=point_id,
-            vector=embedding.values,
-            payload={
-                "text": chunk,
-                "chunk_index": idx,
-                "total_chunks": len(chunks),
-                **metadata,
-            },
-        )
-        points.append(point)
+    # Use smart upsert (only updates if content changed)
+    result = await vector_indexer.upsert_documents(
+        documents=[document],
+        namespace=namespace,
+    )
 
-    qdrant_client.upsert(collection_name="documents", points=points)
-
-    return point_ids
+    return result
 
 
 async def ingest_documents_batch(
-    documents: list[dict],
+    documents: list[Document],
+    source: str,
+    clear_existing: bool = False,
 ) -> dict:
-    total_points = 0
-    total_documents = len(documents)
+    """
+    Ingest a batch of LlamaIndex documents to Pinecone.
 
-    for doc in documents:
-        point_ids = await ingest_document(
-            content=doc["content"],
-            metadata=doc["metadata"],
+    Args:
+        documents: List of LlamaIndex Document objects
+        source: Data source identifier
+        clear_existing: If True, clear namespace before indexing (use with caution)
+
+    Returns:
+        Dict with batch ingestion statistics
+    """
+    namespace = vector_indexer.get_namespace_for_source(source)
+
+    if clear_existing:
+        # Use traditional index with clearing
+        result = await vector_indexer.index_documents(
+            documents=documents,
+            namespace=namespace,
+            clear_existing=True,
         )
-        total_points += len(point_ids)
+    else:
+        # Use smart upsert (only updates changed documents)
+        result = await vector_indexer.upsert_documents(
+            documents=documents,
+            namespace=namespace,
+        )
 
-    return {
-        "total_documents": total_documents,
-        "total_chunks": total_points,
-        "status": "success",
-    }
+    return result
+
+
+async def delete_single_document(
+    source: str,
+    path: str,
+) -> dict:
+    """
+    Delete a specific document from Pinecone.
+
+    Args:
+        source: Data source identifier (github_notes, github_repos, website_roger_ink)
+        path: Document path or identifier
+
+    Returns:
+        Dict with deletion statistics
+    """
+    namespace = vector_indexer.get_namespace_for_source(source)
+    doc_id = vector_indexer.compute_doc_id(source, path)
+
+    result = await vector_indexer.delete_document(doc_id, namespace)
+    return result
