@@ -6,26 +6,33 @@ from langchain_openai import ChatOpenAI
 from app.core.config import settings
 from app.services.retriever import retrieve
 
+# Lazy initialization - only create LLM when needed
+_llm = None
+
 
 def _get_llm():
     """Get LLM instance based on configured provider."""
+    global _llm
+    if _llm is not None:
+        return _llm
+
     provider = settings.LLM_PROVIDER.lower()
     temperature = 0.7
 
     if provider == "google":
-        return ChatGoogleGenerativeAI(
+        _llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-pro",
             google_api_key=settings.GOOGLE_API_KEY,
             temperature=temperature,
         )
     elif provider == "openai":
-        return ChatOpenAI(
+        _llm = ChatOpenAI(
             model="gpt-4o",
             api_key=settings.OPENAI_API_KEY,
             temperature=temperature,
         )
     elif provider == "deepseek":
-        return ChatDeepSeek(
+        _llm = ChatDeepSeek(
             model="deepseek-chat",
             api_key=settings.DEEPSEEK_API_KEY,
             temperature=temperature,
@@ -33,9 +40,8 @@ def _get_llm():
     else:
         raise ValueError(f"Unknown LLM_PROVIDER: {settings.LLM_PROVIDER}")
 
+    return _llm
 
-# Initialize LLM based on configuration
-llm = _get_llm()
 
 # Create prompt template
 prompt_template = ChatPromptTemplate.from_messages(
@@ -80,7 +86,7 @@ async def generate_answer(query: str) -> str:
     context = "\n\n---\n\n".join(docs)
 
     # Create chain and generate answer
-    chain = prompt_template | llm
+    chain = prompt_template | _get_llm()
     response = await chain.ainvoke(
         {
             "context": context,
