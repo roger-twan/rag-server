@@ -7,57 +7,21 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-format:
-    name: Code Format & Lint
+  ci:
+    name: Lint & Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.13'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          pip install black isort flake8
-
-      - name: Check code formatting with Black
-        run: black --check --diff .
-
-      - name: Check import sorting with isort
-        run: isort --check-only --diff .
-
-      - name: Lint with flake8
-        run: flake8 app tests scripts
-
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    needs: lint-and-format
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-
-      - name: Run tests
-        run: |
-          python -m pytest tests/ -v --tb=short
-
-      - name: Upload test results
+      - run: uv pip sync requirements.txt requirements-dev.txt
+      - run: uv run black --check --diff .
+      - run: uv run isort --check-only --diff .
+      - run: uv run flake8 app tests scripts
+      - run: uv run pytest tests/ -v --tb=short
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: |
