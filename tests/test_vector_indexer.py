@@ -245,7 +245,7 @@ class TestUpsertDocuments:
 
         with patch(
             "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
-        ) as mock_get_chunks, patch(
+        ) as mock_get_chunks, patch("app.db.pinecone.get_pinecone_index"), patch(
             "app.indexers.vector_indexer.prepare_vectors"
         ) as mock_prepare, patch(
             "app.db.pinecone.upsert_vectors"
@@ -295,7 +295,7 @@ class TestUpsertDocuments:
 
         with patch(
             "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
-        ) as mock_get_chunks, patch(
+        ) as mock_get_chunks, patch("app.db.pinecone.get_pinecone_index"), patch(
             "app.indexers.vector_indexer.prepare_vectors", new_callable=AsyncMock
         ) as mock_prepare, patch(
             "app.db.pinecone.upsert_vectors"
