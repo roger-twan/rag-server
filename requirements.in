@@ -1,5 +1,6 @@
 fastapi[standard]
 httpx[socks]
+slowapi
 
 pydantic
 pydantic-settings

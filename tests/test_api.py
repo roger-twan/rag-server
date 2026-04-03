@@ -5,9 +5,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.main import app
 
 client = TestClient(app)
+
+# Test tokens
+PUBLIC_TOKEN = "test-public-token"
+ADMIN_TOKEN = "test-admin-token"
 
 
 class TestRootEndpoint:
@@ -27,12 +32,17 @@ class TestQueryEndpoint:
     """Tests for query endpoint."""
 
     @pytest.mark.asyncio
-    async def test_query_returns_answer(self):
+    async def test_query_returns_answer(self, monkeypatch):
         """Test that query endpoint returns generated answer."""
+        monkeypatch.setattr(settings, "PUBLIC_API_TOKEN", PUBLIC_TOKEN)
+
         with patch("app.api.routes.generate_answer", new_callable=AsyncMock) as mock_generate:
             mock_generate.return_value = "This is the answer to your question."
 
-            response = client.get("/api/query?q=What is Python?")
+            response = client.get(
+                "/api/query?q=What is Python?",
+                headers={"X-Api-Token": PUBLIC_TOKEN},
+            )
 
             assert response.status_code == 200
             data = response.json()
@@ -41,23 +51,31 @@ class TestQueryEndpoint:
             mock_generate.assert_called_once_with("What is Python?")
 
     @pytest.mark.asyncio
-    async def test_query_without_question(self):
-        """Test that query without q parameter still works."""
-        with patch("app.api.routes.generate_answer", new_callable=AsyncMock) as mock_generate:
-            mock_generate.return_value = "Default answer."
+    async def test_query_without_token_returns_401(self):
+        """Test that query without token returns 401."""
+        response = client.get("/api/query?q=What is Python?")
+        assert response.status_code == 401
 
-            response = client.get("/api/query")
+    @pytest.mark.asyncio
+    async def test_query_with_invalid_token_returns_401(self, monkeypatch):
+        """Test that query with invalid token returns 401."""
+        monkeypatch.setattr(settings, "PUBLIC_API_TOKEN", PUBLIC_TOKEN)
 
-            # Should still work with empty query
-            assert response.status_code in [200, 422]  # 422 if validation fails
+        response = client.get(
+            "/api/query?q=What is Python?",
+            headers={"X-Api-Token": "invalid-token"},
+        )
+        assert response.status_code == 401
 
 
 class TestIngestWebsiteEndpoint:
     """Tests for website ingestion endpoint."""
 
     @pytest.mark.asyncio
-    async def test_triggers_website_sync(self):
+    async def test_triggers_website_sync(self, monkeypatch):
         """Test that endpoint triggers website sync."""
+        monkeypatch.setattr(settings, "ADMIN_API_TOKEN", ADMIN_TOKEN)
+
         with patch("app.api.routes.sync_website", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
@@ -65,15 +83,26 @@ class TestIngestWebsiteEndpoint:
                 "message": "Synced 5 pages",
             }
 
-            response = client.post("/api/ingest/website")
+            response = client.post(
+                "/api/ingest/website",
+                headers={"X-Api-Token": ADMIN_TOKEN},
+            )
 
             assert response.status_code == 200
             assert response.json()["status"] == "success"
             mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_returns_sync_result(self):
+    async def test_without_token_returns_401(self):
+        """Test that endpoint without token returns 401."""
+        response = client.post("/api/ingest/website")
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_returns_sync_result(self, monkeypatch):
         """Test that endpoint returns sync result."""
+        monkeypatch.setattr(settings, "ADMIN_API_TOKEN", ADMIN_TOKEN)
+
         with patch("app.api.routes.sync_website", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
@@ -86,8 +115,12 @@ class TestIngestWebsiteEndpoint:
                 },
             }
 
-            response = client.post("/api/ingest/website")
+            response = client.post(
+                "/api/ingest/website",
+                headers={"X-Api-Token": ADMIN_TOKEN},
+            )
 
+            assert response.status_code == 200
             data = response.json()
             assert data["status"] == "success"
             assert "details" in data
@@ -98,8 +131,10 @@ class TestIngestGithubReposEndpoint:
     """Tests for GitHub repos ingestion endpoint."""
 
     @pytest.mark.asyncio
-    async def test_triggers_github_sync(self):
+    async def test_triggers_github_sync(self, monkeypatch):
         """Test that endpoint triggers GitHub repos sync."""
+        monkeypatch.setattr(settings, "ADMIN_API_TOKEN", ADMIN_TOKEN)
+
         with patch("app.api.routes.sync_all_github_repos", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
@@ -107,15 +142,26 @@ class TestIngestGithubReposEndpoint:
                 "message": "Synced 10 repos",
             }
 
-            response = client.post("/api/ingest/github-all-repos")
+            response = client.post(
+                "/api/ingest/github-all-repos",
+                headers={"X-Api-Token": ADMIN_TOKEN},
+            )
 
             assert response.status_code == 200
             assert response.json()["status"] == "success"
             mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_returns_sync_stats(self):
+    async def test_without_token_returns_401(self):
+        """Test that endpoint without token returns 401."""
+        response = client.post("/api/ingest/github-all-repos")
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_returns_sync_stats(self, monkeypatch):
         """Test that endpoint returns sync statistics."""
+        monkeypatch.setattr(settings, "ADMIN_API_TOKEN", ADMIN_TOKEN)
+
         with patch("app.api.routes.sync_all_github_repos", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
@@ -128,8 +174,12 @@ class TestIngestGithubReposEndpoint:
                 },
             }
 
-            response = client.post("/api/ingest/github-all-repos")
+            response = client.post(
+                "/api/ingest/github-all-repos",
+                headers={"X-Api-Token": ADMIN_TOKEN},
+            )
 
+            assert response.status_code == 200
             data = response.json()
             assert data["status"] == "success"
             assert "details" in data
@@ -140,8 +190,10 @@ class TestIngestNotesEndpoint:
     """Tests for notes repo ingestion endpoint."""
 
     @pytest.mark.asyncio
-    async def test_triggers_notes_sync(self):
+    async def test_triggers_notes_sync(self, monkeypatch):
         """Test that endpoint triggers notes repo sync."""
+        monkeypatch.setattr(settings, "ADMIN_API_TOKEN", ADMIN_TOKEN)
+
         with patch("app.api.routes.sync_notes", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
@@ -149,15 +201,26 @@ class TestIngestNotesEndpoint:
                 "message": "Re-indexed 5 documents with 25 chunks",
             }
 
-            response = client.post("/api/ingest/notes")
+            response = client.post(
+                "/api/ingest/notes",
+                headers={"X-Api-Token": ADMIN_TOKEN},
+            )
 
             assert response.status_code == 200
             assert response.json()["status"] == "success"
             mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_returns_sync_result(self):
+    async def test_without_token_returns_401(self):
+        """Test that endpoint without token returns 401."""
+        response = client.post("/api/ingest/notes")
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_returns_sync_result(self, monkeypatch):
         """Test that endpoint returns sync statistics."""
+        monkeypatch.setattr(settings, "ADMIN_API_TOKEN", ADMIN_TOKEN)
+
         with patch("app.api.routes.sync_notes", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = {
                 "status": "success",
@@ -170,8 +233,12 @@ class TestIngestNotesEndpoint:
                 },
             }
 
-            response = client.post("/api/ingest/notes")
+            response = client.post(
+                "/api/ingest/notes",
+                headers={"X-Api-Token": ADMIN_TOKEN},
+            )
 
+            assert response.status_code == 200
             data = response.json()
             assert data["status"] == "success"
             assert "details" in data

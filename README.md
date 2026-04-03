@@ -276,6 +276,8 @@ cp .env.example .env
 # - GITHUB_TOKEN (for repo loading)
 # - GITHUB_WEBHOOK_SECRET
 # - DEEPSEEK_API_KEY (for DeepSeek LLM)
+# - PUBLIC_API_TOKEN (for /query endpoint request)
+# - ADMIN_API_TOKEN (for ingest endpoints request)
 ```
 
 ### 3. Install pre-commit hooks
@@ -330,8 +332,14 @@ pre-commit run --all-files
 
 All checks must pass before merging to `main`.
 
+## Change Log
+
+### 1.1.0 (2026-04-03)
+- Added API token authentication
+- Added request rate limiting
+
 ## TODO
-- [ ] Add request rate limiting and authentication
+- [x] Add request rate limiting and authentication (v1.1.0)
 - [ ] Support sync specific GitHub repos
 - [ ] Complete sync blog by GitHub Push Webhook
 - [ ] Add chat memory
