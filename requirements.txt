@@ -91,6 +91,7 @@ defusedxml==0.7.1
 deprecated==1.3.1
     # via
     #   banks
+    #   limits
     #   llama-index-core
     #   llama-index-instrumentation
 dirtyjson==1.0.8
@@ -274,6 +275,8 @@ langsmith==0.7.24
     #   langchain-classic
     #   langchain-community
     #   langchain-core
+limits==5.8.0
+    # via slowapi
 llama-index==0.14.19
     # via -r requirements.in
 llama-index-cli==0.5.6
@@ -374,6 +377,7 @@ packaging==26.0
     #   incremental
     #   langchain-core
     #   langsmith
+    #   limits
     #   marshmallow
     #   parsel
     #   scrapy
@@ -543,6 +547,8 @@ six==1.17.0
     #   feedfinder2
     #   markdownify
     #   python-dateutil
+slowapi==0.1.9
+    # via -r requirements.in
 sniffio==1.3.1
     # via
     #   google-genai
@@ -617,6 +623,7 @@ typing-extensions==4.15.0
     #   grpcio
     #   huggingface-hub
     #   langchain-core
+    #   limits
     #   llama-index-core
     #   llama-index-workflows
     #   openai

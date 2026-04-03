@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "google"  # "google", "openai", or "deepseek"
     DEEPSEEK_API_KEY: Optional[str] = None
     GITHUB_WEBHOOK_SECRET: Optional[str] = None
+    PUBLIC_API_TOKEN: str = ""
+    ADMIN_API_TOKEN: str = ""
 
 
 settings = Settings()
