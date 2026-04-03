@@ -10,20 +10,20 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
-def verify_public_token(x_api_token: str = Header(...)):
-    if x_api_token != settings.PUBLIC_API_TOKEN:
+def verify_public_token(x_api_token: str = Header(None)):
+    if x_api_token is None or x_api_token != settings.PUBLIC_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid public API token",
+            detail="Invalid or missing public API token",
         )
     return x_api_token
 
 
-def verify_admin_token(x_api_token: str = Header(...)):
-    if x_api_token != settings.ADMIN_API_TOKEN:
+def verify_admin_token(x_api_token: str = Header(None)):
+    if x_api_token is None or x_api_token != settings.ADMIN_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid admin API token",
+            detail="Invalid or missing admin API token",
         )
     return x_api_token
 
