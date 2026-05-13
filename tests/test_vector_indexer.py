@@ -74,9 +74,10 @@ class TestPrepareVectors:
             metadata={"source": "test", "path": "test.md"},
         )
 
-        with patch(
-            "app.services.embedding.embed_content", new_callable=AsyncMock
-        ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
+        with (
+            patch("app.services.embedding.embed_content", new_callable=AsyncMock) as mock_embed,
+            patch("app.db.pinecone.encode_sparse") as mock_sparse,
+        ):
             mock_embed.return_value = [[0.1] * 1024]  # Single chunk
             mock_sparse.return_value = [{"indices": [1, 2], "values": [0.5, 0.5]}]
 
@@ -95,9 +96,10 @@ class TestPrepareVectors:
             metadata={"source": "test", "path": "test.md"},
         )
 
-        with patch(
-            "app.services.embedding.embed_content", new_callable=AsyncMock
-        ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
+        with (
+            patch("app.services.embedding.embed_content", new_callable=AsyncMock) as mock_embed,
+            patch("app.db.pinecone.encode_sparse") as mock_sparse,
+        ):
             mock_embed.return_value = [[0.1] * 1024]
             mock_sparse.return_value = [{"indices": [1], "values": [0.5]}]
 
@@ -114,9 +116,10 @@ class TestPrepareVectors:
             metadata={"source": "test", "path": "test.md"},
         )
 
-        with patch(
-            "app.services.embedding.embed_content", new_callable=AsyncMock
-        ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
+        with (
+            patch("app.services.embedding.embed_content", new_callable=AsyncMock) as mock_embed,
+            patch("app.db.pinecone.encode_sparse") as mock_sparse,
+        ):
             mock_embed.return_value = [[0.1] * 1024]
             mock_sparse.return_value = [{"indices": [1], "values": [0.5]}]
 
@@ -133,9 +136,10 @@ class TestPrepareVectors:
             metadata={"source": "test", "path": "test.md"},
         )
 
-        with patch(
-            "app.services.embedding.embed_content", new_callable=AsyncMock
-        ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
+        with (
+            patch("app.services.embedding.embed_content", new_callable=AsyncMock) as mock_embed,
+            patch("app.db.pinecone.encode_sparse") as mock_sparse,
+        ):
             mock_embed.return_value = [[0.1] * 1024, [0.2] * 1024, [0.3] * 1024]
             mock_sparse.return_value = [
                 {"indices": [1], "values": [0.5]},
@@ -159,9 +163,10 @@ class TestPrepareVectors:
             metadata={"source": "github_repos", "repo": "my-repo"},
         )
 
-        with patch(
-            "app.services.embedding.embed_content", new_callable=AsyncMock
-        ) as mock_embed, patch("app.db.pinecone.encode_sparse") as mock_sparse:
+        with (
+            patch("app.services.embedding.embed_content", new_callable=AsyncMock) as mock_embed,
+            patch("app.db.pinecone.encode_sparse") as mock_sparse,
+        ):
             mock_embed.return_value = [[0.1] * 1024]
             mock_sparse.return_value = [{"indices": [1], "values": [0.5]}]
 
@@ -243,13 +248,14 @@ class TestUpsertDocuments:
         mock_chunk.id = "chunk_1"
         mock_chunk.metadata = {"doc_hash": doc_hash}  # Same hash
 
-        with patch(
-            "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
-        ) as mock_get_chunks, patch("app.db.pinecone.get_pinecone_index"), patch(
-            "app.indexers.vector_indexer.prepare_vectors"
-        ) as mock_prepare, patch(
-            "app.db.pinecone.upsert_vectors"
-        ) as mock_upsert:
+        with (
+            patch(
+                "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
+            ) as mock_get_chunks,
+            patch("app.db.pinecone.get_pinecone_index"),
+            patch("app.indexers.vector_indexer.prepare_vectors") as mock_prepare,
+            patch("app.db.pinecone.upsert_vectors") as mock_upsert,
+        ):
             mock_get_chunks.return_value = [{"id": "chunk_1", "metadata": {"doc_hash": doc_hash}}]
 
             result = await upsert_documents([doc], "namespace")
@@ -267,13 +273,16 @@ class TestUpsertDocuments:
             metadata={"source": "test", "path": "file.md"},
         )
 
-        with patch(
-            "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
-        ) as mock_get_chunks, patch("app.db.pinecone.get_pinecone_index"), patch(
-            "app.indexers.vector_indexer.prepare_vectors", new_callable=AsyncMock
-        ) as mock_prepare, patch(
-            "app.db.pinecone.upsert_vectors"
-        ) as mock_upsert:
+        with (
+            patch(
+                "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
+            ) as mock_get_chunks,
+            patch("app.db.pinecone.get_pinecone_index"),
+            patch(
+                "app.indexers.vector_indexer.prepare_vectors", new_callable=AsyncMock
+            ) as mock_prepare,
+            patch("app.db.pinecone.upsert_vectors") as mock_upsert,
+        ):
             mock_get_chunks.return_value = [
                 {"id": "old_chunk", "metadata": {"doc_hash": "old_hash"}}
             ]
@@ -293,13 +302,16 @@ class TestUpsertDocuments:
             metadata={"source": "test", "path": "new_file.md"},
         )
 
-        with patch(
-            "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
-        ) as mock_get_chunks, patch("app.db.pinecone.get_pinecone_index"), patch(
-            "app.indexers.vector_indexer.prepare_vectors", new_callable=AsyncMock
-        ) as mock_prepare, patch(
-            "app.db.pinecone.upsert_vectors"
-        ) as mock_upsert:
+        with (
+            patch(
+                "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
+            ) as mock_get_chunks,
+            patch("app.db.pinecone.get_pinecone_index"),
+            patch(
+                "app.indexers.vector_indexer.prepare_vectors", new_callable=AsyncMock
+            ) as mock_prepare,
+            patch("app.db.pinecone.upsert_vectors") as mock_upsert,
+        ):
             mock_get_chunks.return_value = []  # No existing chunks
             mock_prepare.return_value = [{"id": "chunk_1"}]
 

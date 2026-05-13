@@ -257,11 +257,12 @@ class TestWebhookEndpoint:
             "commits": [{"id": "abc123", "message": "Update file"}],
         }
 
-        with patch("app.api.webhooks.verify_github_webhook", return_value=True), patch(
-            "app.api.webhooks.is_notes_repo_push", return_value=True
-        ), patch("app.api.webhooks.NotesRepoLoader.load_documents") as mock_load, patch(
-            "app.api.webhooks.ingest_documents_batch", new_callable=AsyncMock
-        ) as mock_ingest:
+        with (
+            patch("app.api.webhooks.verify_github_webhook", return_value=True),
+            patch("app.api.webhooks.is_notes_repo_push", return_value=True),
+            patch("app.api.webhooks.NotesRepoLoader.load_documents") as mock_load,
+            patch("app.api.webhooks.ingest_documents_batch", new_callable=AsyncMock) as mock_ingest,
+        ):
             mock_load.return_value = []
             mock_ingest.return_value = {"status": "success"}
 
@@ -289,8 +290,9 @@ class TestWebhookEndpoint:
     @pytest.mark.asyncio
     async def test_ignores_non_notes_repo(self):
         """Test that pushes to other repos are ignored."""
-        with patch("app.api.webhooks.verify_github_webhook", return_value=True), patch(
-            "app.api.webhooks.is_notes_repo_push", return_value=False
+        with (
+            patch("app.api.webhooks.verify_github_webhook", return_value=True),
+            patch("app.api.webhooks.is_notes_repo_push", return_value=False),
         ):
             response = client.post(
                 "/api/webhooks/github",

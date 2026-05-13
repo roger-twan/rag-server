@@ -63,11 +63,14 @@ class TestIngestDocumentsBatch:
         """Test that smart upsert is used when clear_existing is False."""
         docs = [Document(text="Content", metadata={"path": "file.md"})]
 
-        with patch(
-            "app.indexers.vector_indexer.upsert_documents", new_callable=AsyncMock
-        ) as mock_upsert, patch(
-            "app.indexers.vector_indexer.index_documents", new_callable=AsyncMock
-        ) as mock_index:
+        with (
+            patch(
+                "app.indexers.vector_indexer.upsert_documents", new_callable=AsyncMock
+            ) as mock_upsert,
+            patch(
+                "app.indexers.vector_indexer.index_documents", new_callable=AsyncMock
+            ) as mock_index,
+        ):
             mock_upsert.return_value = {"documents_updated": 1}
 
             await ingest_documents_batch(docs, "test_source", clear_existing=False)
@@ -80,11 +83,14 @@ class TestIngestDocumentsBatch:
         """Test that index_documents is used when clear_existing is True."""
         docs = [Document(text="Content", metadata={"path": "file.md"})]
 
-        with patch(
-            "app.indexers.vector_indexer.upsert_documents", new_callable=AsyncMock
-        ) as mock_upsert, patch(
-            "app.indexers.vector_indexer.index_documents", new_callable=AsyncMock
-        ) as mock_index:
+        with (
+            patch(
+                "app.indexers.vector_indexer.upsert_documents", new_callable=AsyncMock
+            ) as mock_upsert,
+            patch(
+                "app.indexers.vector_indexer.index_documents", new_callable=AsyncMock
+            ) as mock_index,
+        ):
             mock_index.return_value = {"documents_indexed": 1}
 
             await ingest_documents_batch(docs, "test_source", clear_existing=True)
@@ -120,9 +126,12 @@ class TestDeleteSingleDocument:
     @pytest.mark.asyncio
     async def test_computes_doc_id_and_deletes(self):
         """Test that function computes doc_id and calls delete."""
-        with patch(
-            "app.indexers.vector_indexer.delete_document", new_callable=AsyncMock
-        ) as mock_delete, patch("app.indexers.vector_indexer.compute_doc_id") as mock_compute_id:
+        with (
+            patch(
+                "app.indexers.vector_indexer.delete_document", new_callable=AsyncMock
+            ) as mock_delete,
+            patch("app.indexers.vector_indexer.compute_doc_id") as mock_compute_id,
+        ):
             mock_compute_id.return_value = "computed_doc_id"
             mock_delete.return_value = {"status": "deleted", "chunks_deleted": 3}
 

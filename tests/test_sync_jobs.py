@@ -23,11 +23,14 @@ class TestSyncWebsite:
             ),
         ]
 
-        with patch(
-            "app.scripts.sync_jobs.load_website_documents", new_callable=AsyncMock
-        ) as mock_load, patch(
-            "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
-        ) as mock_ingest:
+        with (
+            patch(
+                "app.scripts.sync_jobs.load_website_documents", new_callable=AsyncMock
+            ) as mock_load,
+            patch(
+                "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
+            ) as mock_ingest,
+        ):
             mock_load.return_value = mock_docs
             mock_ingest.return_value = {
                 "documents_updated": 2,
@@ -76,11 +79,14 @@ class TestSyncWebsite:
         """Test that sync stats are included in result."""
         mock_docs = [Document(text="Content", metadata={"path": "/"})]
 
-        with patch(
-            "app.scripts.sync_jobs.load_website_documents", new_callable=AsyncMock
-        ) as mock_load, patch(
-            "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
-        ) as mock_ingest:
+        with (
+            patch(
+                "app.scripts.sync_jobs.load_website_documents", new_callable=AsyncMock
+            ) as mock_load,
+            patch(
+                "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
+            ) as mock_ingest,
+        ):
             mock_load.return_value = mock_docs
             mock_ingest.return_value = {
                 "documents_updated": 1,
@@ -106,11 +112,14 @@ class TestSyncAllGithubRepos:
             Document(text="Repo 2 README", metadata={"repo": "repo2", "source": "github_repos"}),
         ]
 
-        with patch(
-            "app.scripts.sync_jobs.AllReposLoader.load_all_documents", new_callable=AsyncMock
-        ) as mock_load, patch(
-            "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
-        ) as mock_ingest:
+        with (
+            patch(
+                "app.scripts.sync_jobs.AllReposLoader.load_all_documents", new_callable=AsyncMock
+            ) as mock_load,
+            patch(
+                "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
+            ) as mock_ingest,
+        ):
             mock_load.return_value = mock_docs
             mock_ingest.return_value = {
                 "documents_updated": 2,
@@ -157,11 +166,14 @@ class TestSyncAllGithubRepos:
         """Test that smart upsert is used (clear_existing=False)."""
         mock_docs = [Document(text="Content", metadata={"repo": "test"})]
 
-        with patch(
-            "app.scripts.sync_jobs.AllReposLoader.load_all_documents", new_callable=AsyncMock
-        ) as mock_load, patch(
-            "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
-        ) as mock_ingest:
+        with (
+            patch(
+                "app.scripts.sync_jobs.AllReposLoader.load_all_documents", new_callable=AsyncMock
+            ) as mock_load,
+            patch(
+                "app.scripts.sync_jobs.ingest_documents_batch", new_callable=AsyncMock
+            ) as mock_ingest,
+        ):
             mock_load.return_value = mock_docs
             mock_ingest.return_value = {"documents_updated": 1}
 
