@@ -1,9 +1,41 @@
 [project]
 name = "rag-server"
-version = "1.1.0"
+version = "1.1.1"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]",
+    "httpx[socks]",
+    "slowapi",
+    "pydantic",
+    "pydantic-settings",
+    "llama-index",
+    "llama-index-readers-github",
+    "llama-index-readers-web",
+    "langchain",
+    "langchain-openai",
+    "langchain-deepseek",
+    "langchain-google-genai",
+    "langchain-cohere",
+    "pinecone",
+    "protobuf",
+    "googleapis-common-protos",
+    "grpcio",
+    "pinecone-text",
+]
+
+[dependency-groups]
+dev = [
+    "black",
+    "flake8",
+    "isort",
+    "pytest",
+    "pytest-asyncio",
+    "pre-commit",
+]
 
 [tool.black]
 line-length = 100
+target-version = ["py313"]
 
 [tool.isort]
 profile = "black"

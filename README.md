@@ -1,6 +1,6 @@
 # RAG Server
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)]()
+[![Version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Froger-twan%2Frag-server%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=blue)](pyproject.toml)
 [![Python](https://img.shields.io/badge/python-3.13-pink.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.118.0-009688.svg)](https://fastapi.tiangolo.com/)
 [![Pinecone](https://img.shields.io/badge/Pinecone-8.1.0-orange.svg)](https://www.pinecone.io/)
@@ -257,9 +257,7 @@ rag-server/
 ```bash
 git clone https://github.com/roger-twan/rag-server.git
 cd rag-server
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync --dev
 ```
 
 ### 2. Configure environment
@@ -290,7 +288,7 @@ pre-commit install
 
 ```bash
 # Development
-fastapi dev app/main.py
+uv run fastapi dev app/main.py
 ```
 
 ## Development
@@ -299,27 +297,27 @@ fastapi dev app/main.py
 
 ```bash
 # All tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Specific test file
-pytest tests/test_vector_indexer.py -v
+uv run pytest tests/test_vector_indexer.py -v
 
 # Tests for changed files only (via pre-commit)
-python scripts/run_changed_tests.py
+uv run python scripts/run_changed_tests.py
 ```
 
 ### Code Quality
 
 ```bash
 # Format code
-black .
-isort .
+uv run black .
+uv run isort .
 
 # Lint
-flake8 app tests scripts
+uv run flake8 app tests scripts
 
 # Run pre-commit manually
-pre-commit run --all-files
+uv run pre-commit run --all-files
 ```
 
 ## CI/CD Pipeline
@@ -333,6 +331,12 @@ pre-commit run --all-files
 All checks must pass before merging to `main`.
 
 ## Change Log
+
+### 1.1.1 (2026-05-13)
+- Switched dependency management to `pyproject.toml` and `uv.lock`
+- Removed generated `requirements*.txt` files
+- Updated Docker, CI, and development docs to use `uv`
+- Added a dynamic README version badge sourced from `pyproject.toml`
 
 ### 1.1.0 (2026-04-03)
 - Added API token authentication
