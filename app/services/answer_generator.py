@@ -64,6 +64,22 @@ Answer:""",
 )
 
 
+fallback_prompt_template = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "If the user is greeting you, thanking you, or making simple small talk, respond naturally and briefly. If the user asks for factual or personal knowledge that would require retrieved context, say you don't have enough information.",
+        ),
+        (
+            "human",
+            """Question: {question}
+
+Answer:""",
+        ),
+    ]
+)
+
+
 rewrite_prompt_template = ChatPromptTemplate.from_messages(
     [
         (
@@ -170,7 +186,9 @@ async def generate_answer(query: str, conversation_id: str | None = None) -> dic
     chunks = await retrieve(rewritten_query)
 
     if not chunks:
-        answer = "I don't have enough information to answer this question."
+        fallback_chain = fallback_prompt_template | _get_llm()
+        fallback_response = await fallback_chain.ainvoke({"question": query})
+        answer = fallback_response.content
         postgres.add_message(conversation_id=conversation_id, role="assistant", content=answer)
         return {
             "answer": answer,

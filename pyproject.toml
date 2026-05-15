@@ -1,6 +1,6 @@
 [project]
 name = "rag-server"
-version = "1.2.0"
+version = "1.2.1"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]",

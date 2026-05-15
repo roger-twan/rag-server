@@ -2973,7 +2973,7 @@ wheels = [
 
 [[package]]
 name = "rag-server"
-version = "1.2.0"
+version = "1.2.1"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },

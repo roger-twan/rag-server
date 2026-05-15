@@ -451,6 +451,9 @@ All checks must pass before merging to `main`.
 
 ## Change Log
 
+### 1.2.1 (2026-05-15)
+- Added fallback prompt behavior for greetings and simple small talk when no RAG context is found
+
 ### 1.2.0 (2026-05-15)
 - Added PostgreSQL persistence for documents, chunks, conversations, messages, and retrieval traces
 - Added local PostgreSQL Docker Compose setup
