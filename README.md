@@ -520,10 +520,13 @@ All checks must pass before merging to `main`.
 
 ## Change Log
 
-### 1.3.1 (2026-10-16)
+### 1.3.2 (2026-05-16)
+- Fixed README.md wrong change log dates
+
+### 1.3.1 (2026-05-16)
 - Fixed README.md conflict
 
-### 1.3.0 (2026-10-16)
+### 1.3.0 (2026-05-16)
 - Added `/api/query/stream` for Server-Sent Events streaming responses
 - Documented streaming event types: `metadata`, `token`, and `done`
 
