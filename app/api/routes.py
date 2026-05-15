@@ -1,10 +1,13 @@
+import json
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.config import settings
 from app.scripts.sync_jobs import sync_all_github_repos, sync_notes, sync_website
-from app.services.answer_generator import generate_answer
+from app.services.answer_generator import generate_answer, generate_answer_stream
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -44,6 +47,34 @@ async def query(
         "rewritten_query": result["rewritten_query"],
         "sources": result["sources"],
     }
+
+
+def _sse_event(event: dict) -> str:
+    event_name = event["event"]
+    data = {key: value for key, value in event.items() if key != "event"}
+    return f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.get("/query/stream")
+@limiter.limit("10/minute")
+async def query_stream(
+    request: Request,
+    q: str,
+    conversation_id: str | None = None,
+    token: str = Depends(verify_public_token),
+):
+    async def event_stream():
+        async for event in generate_answer_stream(q, conversation_id=conversation_id):
+            yield _sse_event(event)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/ingest/website")

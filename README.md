@@ -8,7 +8,7 @@
 [![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.12.29-F9D072.svg)](https://www.llamaindex.ai/)
 [![Tests](https://img.shields.io/badge/pytest-9.0.2-green.svg)](https://pytest.org/)
 
-A FastAPI-based Retrieval-Augmented Generation (RAG) server with **PostgreSQL-backed context storage**, **Pinecone vector retrieval**, **conversation-aware query rewriting**, **incremental ingestion**, and **multi-source data loaders**.
+A FastAPI-based Retrieval-Augmented Generation (RAG) server with **PostgreSQL-backed context storage**, **Pinecone vector retrieval**, **conversation-aware query rewriting**, **streaming responses**, **incremental ingestion**, and **multi-source data loaders**.
 
 ## Architecture Overview
 
@@ -37,7 +37,7 @@ flowchart LR
         SEARCH["Dense Search<br/>(Optional Hybrid)"]
         EXPAND["Fetch Full + Neighbor Chunks<br/>from PostgreSQL"]
         RERANK["Cohere Rerank<br/>rerank-v3.5"]
-        ANSWER["Gemini/DeepSeek/OpenAI<br/>Answer Generation"]
+        ANSWER["Gemini/DeepSeek/OpenAI<br/>Answer Generation + Streaming"]
     end
 
     GH --> LOADERS
@@ -154,7 +154,33 @@ User: What database does it use?
 Rewritten query: What database does the RAG server project use?
 ```
 
-### 4. Dense Search with Optional Hybrid Search
+### 4. Streaming RAG Responses
+
+**Problem:** Waiting for the full LLM response makes RAG queries feel slow even when the model has already started generating.
+
+**Solution:** `/api/query/stream` returns Server-Sent Events (SSE), so clients can render answer tokens as they arrive.
+
+```text
+event: metadata
+data: {"conversation_id": "...", "rewritten_query": "...", "sources": [...]}
+
+event: token
+data: {"content": "The"}
+
+event: token
+data: {"content": " answer"}
+
+event: done
+data: {"answer": "The answer..."}
+```
+
+**How it works:**
+- Retrieval happens before generation: relevant chunks are fetched, expanded, reranked, and passed to the LLM as one formatted context
+- Streaming applies to LLM output tokens, not to the retrieved document chunks
+- The final `done.answer` is assembled from the same token events sent during the stream
+- The completed assistant message and retrieval traces are persisted after generation finishes
+
+### 5. Dense Search with Optional Hybrid Search
 
 **Default:** Dense retrieval is enabled by default and works with standard Pinecone dense indexes.
 
@@ -166,7 +192,7 @@ ENABLE_SPARSE_SEARCH=true
 
 Sparse search requires a Pinecone index configuration that supports sparse values. If the index does not support sparse query values, retrieval falls back to dense-only search.
 
-### 5. Improved Document Tracking
+### 6. Improved Document Tracking
 
 **Deterministic IDs:**
 ```python
@@ -191,7 +217,7 @@ Sparse search requires a Pinecone index configuration that supports sparse value
 }
 ```
 
-### 6. Granular Document Operations
+### 7. Granular Document Operations
 
 **Delete by Document ID:**
 ```python
@@ -208,7 +234,7 @@ delete_document("a3f9b2c1d8e7", "github_repos")  # Only that repo
 chunks = await get_document_chunks(doc_id, namespace)
 ```
 
-### 7. Markdown Blog Post Optimization
+### 8. Markdown Blog Post Optimization
 
 Special handling for markdown blog posts:
 
@@ -278,6 +304,7 @@ rag-server/
 | GET | `/` | Health check |
 | GET | `/api/query?q={question}` | Query RAG system |
 | GET | `/api/query?q={question}&conversation_id={id}` | Continue a conversation-aware query |
+| GET | `/api/query/stream?q={question}` | Stream a RAG answer with Server-Sent Events |
 | POST | `/api/ingest/website` | Sync website content |
 | POST | `/api/ingest/github-all-repos` | Sync all GitHub repos |
 | POST | `/api/ingest/notes` | Sync notes repo (blog) manually |
@@ -294,6 +321,16 @@ Query responses include:
   "sources": []
 }
 ```
+
+Streaming query responses use `text/event-stream` and emit:
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `metadata` | `conversation_id`, `rewritten_query`, `sources` | Sent before answer generation starts |
+| `token` | `content` | A generated answer fragment from the LLM |
+| `done` | `answer` | The complete answer assembled from all token events |
+
+The streaming endpoint uses the same public API token header as `/api/query`.
 
 ## Setup
 
@@ -387,6 +424,38 @@ curl "http://127.0.0.1:8000/api/query?q=What%20database%20does%20it%20use%3F&con
   -H "X-Api-Token: $PUBLIC_API_TOKEN"
 ```
 
+To stream an answer with Server-Sent Events:
+
+```bash
+curl -N "http://127.0.0.1:8000/api/query/stream?q=What%20framework%20does%20this%20project%20use%3F" \
+  -H "X-Api-Token: $PUBLIC_API_TOKEN"
+```
+
+For a streaming follow-up question, pass the same `conversation_id`:
+
+```bash
+curl -N "http://127.0.0.1:8000/api/query/stream?q=What%20database%20does%20it%20use%3F&conversation_id=<conversation_id>" \
+  -H "X-Api-Token: $PUBLIC_API_TOKEN"
+```
+
+Example stream:
+
+```text
+event: metadata
+data: {"conversation_id": "8e5c...", "rewritten_query": "What database does the RAG server project use?", "sources": [...]}
+
+event: token
+data: {"content": "It"}
+
+event: token
+data: {"content": " uses PostgreSQL"}
+
+event: done
+data: {"answer": "It uses PostgreSQL..."}
+```
+
+The retrieved RAG chunks are sent to the LLM up front as context. The `token` events are generated answer fragments, and `done.answer` is the concatenation of those fragments.
+
 ### Reset local data
 
 Clear PostgreSQL data:
@@ -451,6 +520,10 @@ All checks must pass before merging to `main`.
 
 ## Change Log
 
+### 1.3.0 (2026-10-16)
+- Added `/api/query/stream` for Server-Sent Events streaming responses
+- Documented streaming event types: `metadata`, `token`, and `done`
+
 ### 1.2.1 (2026-05-15)
 - Added fallback prompt behavior for greetings and simple small talk when no RAG context is found
 
@@ -479,4 +552,4 @@ All checks must pass before merging to `main`.
 - [ ] Complete sync blog by GitHub Push Webhook
 - [x] Add chat memory (v1.2.0)
 - [ ] Add evaluation strategy
-- [ ] Support streaming responses
+- [x] Support streaming responses

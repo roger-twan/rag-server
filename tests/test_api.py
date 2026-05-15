@@ -75,6 +75,44 @@ class TestQueryEndpoint:
         )
         assert response.status_code == 401
 
+    @pytest.mark.asyncio
+    async def test_query_stream_returns_sse_events(self, monkeypatch):
+        """Test that streaming query endpoint returns server-sent events."""
+        monkeypatch.setattr(settings, "PUBLIC_API_TOKEN", PUBLIC_TOKEN)
+
+        async def fake_stream(q, conversation_id=None):
+            yield {
+                "event": "metadata",
+                "conversation_id": "conv-1",
+                "rewritten_query": q,
+                "sources": [],
+            }
+            yield {"event": "token", "content": "Hello"}
+            yield {"event": "token", "content": "!"}
+            yield {"event": "done", "answer": "Hello!"}
+
+        with patch("app.api.routes.generate_answer_stream", fake_stream):
+            response = client.get(
+                "/api/query/stream?q=Hello&conversation_id=conv-1",
+                headers={"X-Api-Token": PUBLIC_TOKEN},
+            )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.text == (
+            'event: metadata\ndata: {"conversation_id": "conv-1", '
+            '"rewritten_query": "Hello", "sources": []}\n\n'
+            'event: token\ndata: {"content": "Hello"}\n\n'
+            'event: token\ndata: {"content": "!"}\n\n'
+            'event: done\ndata: {"answer": "Hello!"}\n\n'
+        )
+
+    @pytest.mark.asyncio
+    async def test_query_stream_without_token_returns_401(self):
+        """Test that streaming query endpoint requires a public token."""
+        response = client.get("/api/query/stream?q=Hello")
+        assert response.status_code == 401
+
 
 class TestIngestWebsiteEndpoint:
     """Tests for website ingestion endpoint."""

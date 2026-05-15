@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -160,6 +162,17 @@ def _format_sources(chunks: list[dict]) -> list[dict]:
     return sources
 
 
+def _chunk_content(chunk) -> str:
+    content = getattr(chunk, "content", chunk)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+        )
+    return str(content) if content is not None else ""
+
+
 async def generate_answer(query: str, conversation_id: str | None = None) -> dict:
     """
     Generate answer using RAG pipeline:
@@ -223,3 +236,54 @@ async def generate_answer(query: str, conversation_id: str | None = None) -> dic
         "rewritten_query": rewritten_query,
         "sources": _format_sources(chunks),
     }
+
+
+async def generate_answer_stream(
+    query: str, conversation_id: str | None = None
+) -> AsyncIterator[dict]:
+    conversation_id = postgres.ensure_conversation(conversation_id)
+    rewritten_query = await _rewrite_query(query, conversation_id)
+    user_message_id = postgres.add_message(
+        conversation_id=conversation_id,
+        role="user",
+        content=query,
+        rewritten_query=rewritten_query,
+    )
+
+    chunks = await retrieve(rewritten_query)
+    sources = _format_sources(chunks)
+    yield {
+        "event": "metadata",
+        "conversation_id": conversation_id,
+        "rewritten_query": rewritten_query,
+        "sources": sources,
+    }
+
+    if chunks:
+        chain = prompt_template | _get_llm()
+        stream_input = {
+            "context": _format_context(chunks),
+            "question": query,
+        }
+    else:
+        chain = fallback_prompt_template | _get_llm()
+        stream_input = {"question": query}
+
+    answer_parts = []
+    async for chunk in chain.astream(stream_input):
+        token = _chunk_content(chunk)
+        if not token:
+            continue
+        answer_parts.append(token)
+        yield {"event": "token", "content": token}
+
+    answer = "".join(answer_parts)
+    postgres.add_message(conversation_id=conversation_id, role="assistant", content=answer)
+    if chunks:
+        postgres.add_retrieval_traces(
+            message_id=user_message_id,
+            query=rewritten_query,
+            chunks=chunks,
+        )
+
+    yield {"event": "done", "answer": answer}
