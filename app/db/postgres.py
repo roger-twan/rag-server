@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -22,9 +22,12 @@ from app.core.config import settings
 
 
 def _database_url() -> str:
-    if settings.DATABASE_URL.startswith("postgresql://"):
-        return settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-    return settings.DATABASE_URL
+    url = settings.DATABASE_URL
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
 
 
 class Base(DeclarativeBase):
@@ -175,6 +178,7 @@ def replace_document_chunks(
     chunks: list[dict[str, Any]],
     session: Session,
 ) -> None:
+    """Replace all chunks for a document within the caller's transaction."""
     session.query(ChunkRecord).filter(ChunkRecord.document_id == doc_id).delete()
     for chunk in chunks:
         session.add(
@@ -295,3 +299,14 @@ def add_retrieval_traces(
                     rank=rank,
                 )
             )
+
+
+def cleanup_conversations_older_than(retention_days: int) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    with session_scope() as session:
+        rows_deleted = (
+            session.query(ConversationRecord)
+            .filter(ConversationRecord.created_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        return rows_deleted

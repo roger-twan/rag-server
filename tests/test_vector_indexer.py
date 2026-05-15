@@ -12,6 +12,7 @@ from app.indexers.vector_indexer import (
     delete_document,
     get_document_chunks,
     get_namespace_for_source,
+    index_documents,
     prepare_vectors,
     upsert_documents,
 )
@@ -328,6 +329,50 @@ class TestUpsertDocuments:
             assert result["documents_updated"] == 1
             mock_upsert.assert_called_once()
             mock_persist.assert_called_once()
+
+
+class TestIndexDocuments:
+    """Tests for full indexing operation ordering."""
+
+    @pytest.mark.asyncio
+    async def test_persists_postgres_before_pinecone_upsert(self):
+        """Test that PostgreSQL is written before Pinecone vectors are upserted."""
+        doc = Document(text="New document content", metadata={"source": "test", "path": "a.md"})
+        call_order = []
+
+        with (
+            patch("app.db.pinecone.get_pinecone_index"),
+            patch(
+                "app.indexers.vector_indexer._prepare_vectors_and_records", new_callable=AsyncMock
+            ) as mock_prepare,
+            patch("app.indexers.vector_indexer._persist_document_records") as mock_persist,
+            patch("app.db.pinecone.upsert_vectors") as mock_upsert,
+        ):
+            mock_prepare.return_value = ([{"id": "chunk_1"}], [{"doc_id": "doc"}])
+            mock_persist.side_effect = lambda records: call_order.append("postgres")
+            mock_upsert.side_effect = lambda vectors, namespace: call_order.append("pinecone")
+
+            result = await index_documents([doc], "namespace")
+
+        assert result["status"] == "success"
+        assert call_order == ["postgres", "pinecone"]
+
+    def test_pinecone_upsert_failure_attempts_compensating_delete(self):
+        """Test partial Pinecone upsert failure triggers cleanup for written vector IDs."""
+        from app.indexers import vector_indexer
+
+        vectors = [{"id": f"chunk_{i}"} for i in range(101)]
+
+        with (
+            patch("app.db.pinecone.upsert_vectors") as mock_upsert,
+            patch("app.indexers.vector_indexer._delete_vectors_by_ids") as mock_delete,
+        ):
+            mock_upsert.side_effect = [None, RuntimeError("pinecone unavailable")]
+
+            with pytest.raises(RuntimeError):
+                vector_indexer._upsert_vectors_after_postgres(vectors, "namespace")
+
+        mock_delete.assert_called_once_with([f"chunk_{i}" for i in range(100)], "namespace")
 
 
 class TestGetNamespaceForSource:

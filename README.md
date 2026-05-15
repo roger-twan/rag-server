@@ -341,6 +341,8 @@ user: rag
 password: rag
 ```
 
+These credentials are for local development only. Production deployments should use secret-managed credentials and a different password.
+
 ### 4. Install pre-commit hooks
 
 ```bash
@@ -402,6 +404,12 @@ uv run python -c "from app.db.pinecone import clear_namespace; [clear_namespace(
 
 Then rerun the ingestion endpoints.
 
+Clean up old conversation history and retrieval traces:
+
+```bash
+uv run python -c "from app.db.postgres import cleanup_conversations_older_than; print(cleanup_conversations_older_than(30))"
+```
+
 ## Development
 
 ### Running Tests
@@ -450,6 +458,7 @@ All checks must pass before merging to `main`.
 - Added conversation-aware query rewriting with `conversation_id`
 - Added full chunk and neighboring chunk retrieval from PostgreSQL
 - Added `ENABLE_SPARSE_SEARCH` to keep sparse/hybrid search optional per Pinecone index configuration
+- Added PostgreSQL conversation cleanup helper for retention jobs
 
 ### 1.1.1 (2026-05-13)
 - Switched dependency management to `pyproject.toml` and `uv.lock`

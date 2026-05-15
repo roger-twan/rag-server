@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,6 +9,8 @@ from app.core.config import settings
 from app.db import pinecone, postgres
 from app.services import chunker, embedding
 from app.services.markdown_chunker import chunk_markdown_document
+
+logger = logging.getLogger(__name__)
 
 
 def compute_doc_id(source: str, path: str) -> str:
@@ -174,6 +177,40 @@ def _persist_document_records(document_records: list[dict]) -> None:
             )
 
 
+def _delete_vectors_by_ids(ids: list[str], namespace: str) -> None:
+    if not ids:
+        return
+    index = pinecone.get_pinecone_index()
+    index.delete(ids=ids, namespace=namespace)
+
+
+def _upsert_vectors_after_postgres(vectors: list[dict], namespace: str) -> None:
+    upserted_ids = []
+    batch_size = 100
+    try:
+        for i in range(0, len(vectors), batch_size):
+            batch = vectors[i : i + batch_size]
+            pinecone.upsert_vectors(batch, namespace)
+            upserted_ids.extend(vector["id"] for vector in batch)
+    except Exception:
+        logger.critical(
+            "Pinecone upsert failed after PostgreSQL write; attempting compensating delete "
+            "for %s vectors in namespace %s",
+            len(upserted_ids),
+            namespace,
+            exc_info=True,
+        )
+        try:
+            _delete_vectors_by_ids(upserted_ids, namespace)
+        except Exception:
+            logger.critical(
+                "Compensating Pinecone delete failed for namespace %s; manual cleanup required",
+                namespace,
+                exc_info=True,
+            )
+        raise
+
+
 async def index_documents(
     documents: list[Document],
     namespace: str,
@@ -190,12 +227,6 @@ async def index_documents(
     Returns:
         Dict with indexing statistics
     """
-    index = pinecone.get_pinecone_index()
-
-    # Clear existing vectors if requested
-    if clear_existing:
-        index.delete(delete_all=True, namespace=namespace)
-
     # Prepare vectors (async)
     vectors, document_records = await _prepare_vectors_and_records(documents)
 
@@ -207,13 +238,11 @@ async def index_documents(
             "status": "no_data",
         }
 
-    # Upsert in batches
-    batch_size = 100
-    for i in range(0, len(vectors), batch_size):
-        batch = vectors[i : i + batch_size]
-        pinecone.upsert_vectors(batch, namespace)
-
     _persist_document_records(document_records)
+    index = pinecone.get_pinecone_index()
+    if clear_existing:
+        index.delete(delete_all=True, namespace=namespace)
+    _upsert_vectors_after_postgres(vectors, namespace)
 
     return {
         "namespace": namespace,
@@ -299,8 +328,6 @@ async def upsert_documents(
     Returns:
         Dict with upsert statistics
     """
-    index = pinecone.get_pinecone_index()
-
     updated = 0
     unchanged = 0
     deleted = 0
@@ -325,15 +352,16 @@ async def upsert_documents(
                 unchanged += 1
                 continue
 
-            # Content changed - delete old chunks
-            ids_to_delete = [chunk["id"] for chunk in existing_chunks]
-            index.delete(ids=ids_to_delete, namespace=namespace)
-            deleted += len(ids_to_delete)
-
         # Insert new chunks
         vectors, document_records = await _prepare_vectors_and_records([doc])
-        pinecone.upsert_vectors(vectors, namespace)
         _persist_document_records(document_records)
+        _upsert_vectors_after_postgres(vectors, namespace)
+
+        if existing_chunks:
+            new_ids = {vector["id"] for vector in vectors}
+            stale_ids = [chunk["id"] for chunk in existing_chunks if chunk["id"] not in new_ids]
+            _delete_vectors_by_ids(stale_ids, namespace)
+            deleted += len(stale_ids)
         updated += 1
 
     # Calculate total chunks after all updates
