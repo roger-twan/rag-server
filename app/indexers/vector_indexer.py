@@ -4,7 +4,8 @@ from typing import Any
 
 from llama_index.core import Document
 
-from app.db import pinecone
+from app.core.config import settings
+from app.db import pinecone, postgres
 from app.services import chunker, embedding
 from app.services.markdown_chunker import chunk_markdown_document
 
@@ -52,7 +53,17 @@ async def prepare_vectors(
     Convert LlamaIndex documents to Pinecone vectors with doc_id tracking.
     Uses markdown-aware chunking for blog posts, simple chunking for others.
     """
+    vectors, _ = await _prepare_vectors_and_records(documents, chunk_size, chunk_overlap)
+    return vectors
+
+
+async def _prepare_vectors_and_records(
+    documents: list[Document],
+    chunk_size: int = 500,
+    chunk_overlap: int = 200,
+) -> tuple[list[dict], list[dict]]:
     vectors = []
+    document_records = []
 
     for doc in documents:
         text = doc.text
@@ -82,7 +93,8 @@ async def prepare_vectors(
 
         # Create embeddings
         chunk_embeddings = await embedding.embed_content(chunks)
-        sparse_vectors = pinecone.encode_sparse(chunks)
+        sparse_vectors = pinecone.encode_sparse(chunks) if settings.ENABLE_SPARSE_SEARCH else []
+        db_chunks = []
 
         for idx, chunk in enumerate(chunks):
             embedding_values = chunk_embeddings[idx]
@@ -90,6 +102,7 @@ async def prepare_vectors(
             point_id = f"{doc_id}_{idx}"
             chunk_hash = compute_content_hash(chunk)
             chunk_meta = chunk_metadata_list[idx]
+            text_preview = chunk[:500]
 
             # Sanitize metadata for Pinecone compatibility
             clean_metadata = sanitize_metadata_for_pinecone(metadata)
@@ -99,7 +112,8 @@ async def prepare_vectors(
                 "id": point_id,
                 "values": embedding_values,
                 "metadata": {
-                    "text": chunk[:2000],  # Truncate to avoid metadata size limit
+                    "chunk_id": point_id,
+                    "text_preview": text_preview,
                     "doc_id": doc_id,
                     "doc_hash": doc_hash,
                     "chunk_hash": chunk_hash,
@@ -115,8 +129,49 @@ async def prepare_vectors(
                 vector["sparse_values"] = sparse_vector
 
             vectors.append(vector)
+            db_chunks.append(
+                {
+                    "id": point_id,
+                    "chunk_index": idx,
+                    "text": chunk,
+                    "text_preview": text_preview,
+                    "content_hash": chunk_hash,
+                    "meta": {**clean_metadata, **clean_chunk_meta},
+                }
+            )
 
-    return vectors
+        document_records.append(
+            {
+                "doc_id": doc_id,
+                "source": source,
+                "path": path,
+                "title": str(metadata.get("title", "")),
+                "content_hash": doc_hash,
+                "meta": sanitize_metadata_for_pinecone(metadata),
+                "chunks": db_chunks,
+            }
+        )
+
+    return vectors, document_records
+
+
+def _persist_document_records(document_records: list[dict]) -> None:
+    with postgres.session_scope() as session:
+        for record in document_records:
+            postgres.upsert_document(
+                doc_id=record["doc_id"],
+                source=record["source"],
+                path=record["path"],
+                title=record["title"],
+                content_hash=record["content_hash"],
+                meta=record["meta"],
+                session=session,
+            )
+            postgres.replace_document_chunks(
+                doc_id=record["doc_id"],
+                chunks=record["chunks"],
+                session=session,
+            )
 
 
 async def index_documents(
@@ -142,7 +197,7 @@ async def index_documents(
         index.delete(delete_all=True, namespace=namespace)
 
     # Prepare vectors (async)
-    vectors = await prepare_vectors(documents)
+    vectors, document_records = await _prepare_vectors_and_records(documents)
 
     if not vectors:
         return {
@@ -157,6 +212,8 @@ async def index_documents(
     for i in range(0, len(vectors), batch_size):
         batch = vectors[i : i + batch_size]
         pinecone.upsert_vectors(batch, namespace)
+
+    _persist_document_records(document_records)
 
     return {
         "namespace": namespace,
@@ -217,6 +274,7 @@ async def delete_document(doc_id: str, namespace: str) -> dict[str, Any]:
     ids_to_delete = [chunk["id"] for chunk in existing_chunks]
     index = pinecone.get_pinecone_index()
     index.delete(ids=ids_to_delete, namespace=namespace)
+    postgres.delete_document(doc_id)
 
     return {
         "doc_id": doc_id,
@@ -262,7 +320,7 @@ async def upsert_documents(
             # Get the doc_hash from first chunk
             old_hash = existing_chunks[0]["metadata"].get("doc_hash")
 
-            if old_hash == new_hash:
+            if old_hash == new_hash and postgres.document_has_chunks(doc_id):
                 # Content unchanged, skip
                 unchanged += 1
                 continue
@@ -273,8 +331,9 @@ async def upsert_documents(
             deleted += len(ids_to_delete)
 
         # Insert new chunks
-        vectors = await prepare_vectors([doc])
+        vectors, document_records = await _prepare_vectors_and_records([doc])
         pinecone.upsert_vectors(vectors, namespace)
+        _persist_document_records(document_records)
         updated += 1
 
     # Calculate total chunks after all updates

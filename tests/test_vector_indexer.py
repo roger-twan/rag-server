@@ -208,11 +208,15 @@ class TestDeleteDocument:
         mock_match.id = "chunk_id_1"
         mock_results.matches = [mock_match]
 
-        with patch("app.db.pinecone.get_pinecone_index", return_value=mock_index):
+        with (
+            patch("app.db.pinecone.get_pinecone_index", return_value=mock_index),
+            patch("app.db.postgres.delete_document") as mock_delete_db,
+        ):
             mock_index.query.return_value = mock_results
             result = await delete_document("doc_id", "namespace")
 
         mock_index.delete.assert_called_once_with(ids=["chunk_id_1"], namespace="namespace")
+        mock_delete_db.assert_called_once_with("doc_id")
         assert result["status"] == "deleted"
         assert result["chunks_deleted"] == 1
 
@@ -252,8 +256,9 @@ class TestUpsertDocuments:
             patch(
                 "app.indexers.vector_indexer.get_document_chunks", new_callable=AsyncMock
             ) as mock_get_chunks,
+            patch("app.db.postgres.document_has_chunks", return_value=True),
             patch("app.db.pinecone.get_pinecone_index"),
-            patch("app.indexers.vector_indexer.prepare_vectors") as mock_prepare,
+            patch("app.indexers.vector_indexer._prepare_vectors_and_records") as mock_prepare,
             patch("app.db.pinecone.upsert_vectors") as mock_upsert,
         ):
             mock_get_chunks.return_value = [{"id": "chunk_1", "metadata": {"doc_hash": doc_hash}}]
@@ -279,20 +284,22 @@ class TestUpsertDocuments:
             ) as mock_get_chunks,
             patch("app.db.pinecone.get_pinecone_index"),
             patch(
-                "app.indexers.vector_indexer.prepare_vectors", new_callable=AsyncMock
+                "app.indexers.vector_indexer._prepare_vectors_and_records", new_callable=AsyncMock
             ) as mock_prepare,
+            patch("app.indexers.vector_indexer._persist_document_records") as mock_persist,
             patch("app.db.pinecone.upsert_vectors") as mock_upsert,
         ):
             mock_get_chunks.return_value = [
                 {"id": "old_chunk", "metadata": {"doc_hash": "old_hash"}}
             ]
-            mock_prepare.return_value = [{"id": "new_chunk"}]
+            mock_prepare.return_value = ([{"id": "new_chunk"}], [{"doc_id": "doc"}])
 
             result = await upsert_documents([doc], "namespace")
 
             assert result["documents_updated"] == 1
             assert result["chunks_deleted"] == 1  # Old chunk deleted
             mock_upsert.assert_called_once()
+            mock_persist.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handles_new_documents(self):
@@ -308,17 +315,19 @@ class TestUpsertDocuments:
             ) as mock_get_chunks,
             patch("app.db.pinecone.get_pinecone_index"),
             patch(
-                "app.indexers.vector_indexer.prepare_vectors", new_callable=AsyncMock
+                "app.indexers.vector_indexer._prepare_vectors_and_records", new_callable=AsyncMock
             ) as mock_prepare,
+            patch("app.indexers.vector_indexer._persist_document_records") as mock_persist,
             patch("app.db.pinecone.upsert_vectors") as mock_upsert,
         ):
             mock_get_chunks.return_value = []  # No existing chunks
-            mock_prepare.return_value = [{"id": "chunk_1"}]
+            mock_prepare.return_value = ([{"id": "chunk_1"}], [{"doc_id": "doc"}])
 
             result = await upsert_documents([doc], "namespace")
 
             assert result["documents_updated"] == 1
             mock_upsert.assert_called_once()
+            mock_persist.assert_called_once()
 
 
 class TestGetNamespaceForSource:

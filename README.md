@@ -8,7 +8,7 @@
 [![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.12.29-F9D072.svg)](https://www.llamaindex.ai/)
 [![Tests](https://img.shields.io/badge/pytest-9.0.2-green.svg)](https://pytest.org/)
 
-A FastAPI-based Retrieval-Augmented Generation (RAG) server with **hybrid search** (dense + sparse vectors), **incremental ingestion**, and **multi-source data loaders**.
+A FastAPI-based Retrieval-Augmented Generation (RAG) server with **PostgreSQL-backed context storage**, **Pinecone vector retrieval**, **conversation-aware query rewriting**, **incremental ingestion**, and **multi-source data loaders**.
 
 ## Architecture Overview
 
@@ -24,16 +24,18 @@ flowchart LR
         LOADERS["Loaders<br/>(GitHub API, Sitemap)"]
         CHUNK["LlamaIndex<br/>Text Chunking"]
         EMBED["OpenAI Embeddings<br/>text-embedding-3-small"]
-        BM25["BM25 Sparse<br/>Encoding"]
+        BM25["Optional BM25 Sparse<br/>Encoding"]
     end
 
-    subgraph VectorDB["Pinecone Vector DB"]
-        DENSE[("Dense Vectors<br/>1024d)]
-        SPARSE[("Sparse Vectors<br/>BM25)]
+    subgraph Storage["Storage"]
+        PG[("PostgreSQL<br/>Documents, Chunks,<br/>Conversations, Traces")]
+        PINE[("Pinecone<br/>Vector Index<br/>chunk_id + preview")]
     end
 
     subgraph Retrieval["Retrieval & Generation"]
-        HYBRID["Hybrid Search<br/>(Dense + Sparse)"]
+        REWRITE["Query Rewrite<br/>(Conversation Context)"]
+        SEARCH["Dense Search<br/>(Optional Hybrid)"]
+        EXPAND["Fetch Full + Neighbor Chunks<br/>from PostgreSQL"]
         RERANK["Cohere Rerank<br/>rerank-v3.5"]
         ANSWER["Gemini/DeepSeek/OpenAI<br/>Answer Generation"]
     end
@@ -45,15 +47,18 @@ flowchart LR
     LOADERS --> CHUNK
     CHUNK --> EMBED
     CHUNK --> BM25
-    
-    EMBED --> DENSE
-    BM25 --> SPARSE
-    
-    DENSE --> HYBRID
-    SPARSE --> HYBRID
-    
-    HYBRID --> RERANK
+
+    CHUNK --> PG
+    EMBED --> PINE
+    BM25 --> PINE
+
+    REWRITE --> SEARCH
+    PINE --> SEARCH
+    SEARCH --> EXPAND
+    PG --> EXPAND
+    EXPAND --> RERANK
     RERANK --> ANSWER
+    ANSWER --> PG
 ```
 
 ## Technology Stack
@@ -64,9 +69,13 @@ flowchart LR
 - **LangChain** - LLM integration and orchestration
 
 ### Vector Database & Search
-- **Pinecone** - Managed vector database with hybrid search
+- **Pinecone** - Managed vector database for retrieval
   - Dense vectors: OpenAI `text-embedding-3-small` (1024d)
-  - Sparse vectors: BM25 encoding for keyword search
+- **PostgreSQL** - Persistent context and trace storage
+  - Full document chunks
+  - Conversation and message history
+  - Retrieval traces for debugging
+- **Optional sparse search** - BM25 sparse vectors behind `ENABLE_SPARSE_SEARCH`
 
 ### LLM & Embeddings
 - **OpenAI** - `text-embedding-3-small` for embeddings, `gpt-4o` for generation
@@ -80,6 +89,7 @@ flowchart LR
 - **Website Crawler** - Sitemap-based page ingestion
 
 ### Development & CI/CD
+- **Docker Compose** - Local PostgreSQL development database
 - **Pre-commit** - Black, isort, flake8, pytest for changed files
 - **GitHub Actions** - PR checks for format, lint, and tests
 - **pytest** - Async test support with mocking
@@ -110,32 +120,53 @@ else:
 - Granular deletion - remove single documents without clearing namespace
 - Traceable metadata: `doc_id`, `doc_hash`, `chunk_hash`, `last_updated`
 
-### 2. Hybrid Search (Dense + Sparse)
+### 2. PostgreSQL-Backed Context Storage
 
-**Problem:** Pure semantic search misses exact keyword matches; pure keyword search misses semantic meaning.
+**Problem:** Pinecone metadata is not a reliable full-text document store. Large chunks can be truncated, conversation state is hard to persist, and retrieval debugging needs more than vector metadata.
 
-**Solution:** Combined dense + sparse vectors in Pinecone:
+**Solution:** Store full documents, chunks, conversations, messages, and retrieval traces in PostgreSQL:
 
-```python
-# Dense vector from OpenAI embeddings
-embedding = embed_text(chunk)
-
-# Sparse vector from BM25 keyword encoding  
-sparse_vector = bm25_encoder.encode_queries(chunk)
-
-# Hybrid search combines both
-results = index.query(
-    vector=embedding,
-    sparse_vector=sparse_vector,
-    top_k=10
-)
+```text
+documents
+chunks
+conversations
+messages
+retrieval_traces
 ```
 
 **Benefits:**
-- Captures semantic similarity AND exact keyword matches
-- Better retrieval for technical terms, package names, version numbers
+- Pinecone stores only retrieval metadata such as `chunk_id`, `text_preview`, `doc_id`, and `chunk_index`
+- PostgreSQL stores the full chunk text
+- Retrieval can expand a matched chunk with neighboring chunks from the same document
+- Conversation history and retrieval traces are persisted for follow-up questions and debugging
 
-### 3. Improved Document Tracking
+### 3. Conversation-Aware Query Rewriting
+
+**Problem:** A single query string cannot resolve follow-up questions like "what database does it use?" without chat history.
+
+**Solution:** `/api/query` accepts an optional `conversation_id`. The service stores messages in PostgreSQL and rewrites the latest user question into a standalone retrieval query before searching.
+
+**Example:**
+```text
+User: What framework does this project use?
+Assistant: ...
+User: What database does it use?
+Rewritten query: What database does the RAG server project use?
+```
+
+### 4. Dense Search with Optional Hybrid Search
+
+**Default:** Dense retrieval is enabled by default and works with standard Pinecone dense indexes.
+
+**Optional:** BM25 sparse vectors can be enabled with:
+
+```text
+ENABLE_SPARSE_SEARCH=true
+```
+
+Sparse search requires a Pinecone index configuration that supports sparse values. If the index does not support sparse query values, retrieval falls back to dense-only search.
+
+### 5. Improved Document Tracking
 
 **Deterministic IDs:**
 ```python
@@ -160,7 +191,7 @@ results = index.query(
 }
 ```
 
-### 4. Granular Document Operations
+### 6. Granular Document Operations
 
 **Delete by Document ID:**
 ```python
@@ -177,7 +208,7 @@ delete_document("a3f9b2c1d8e7", "github_repos")  # Only that repo
 chunks = await get_document_chunks(doc_id, namespace)
 ```
 
-### 5. Markdown Blog Post Optimization
+### 7. Markdown Blog Post Optimization
 
 Special handling for markdown blog posts:
 
@@ -211,7 +242,8 @@ rag-server/
 │   │   ├── config.py            # Pydantic settings
 │   │   └── events.py            # FastAPI lifespan (startup/shutdown)
 │   ├── db/
-│   │   └── pinecone.py          # Pinecone client & BM25 encoder
+│   │   ├── pinecone.py          # Pinecone client & BM25 encoder
+│   │   └── postgres.py          # SQLAlchemy models and persistence helpers
 │   ├── loaders/
 │   │   ├── github_loader.py     # GitHub repos + dependency parsing
 │   │   └── website_loader.py    # Website sitemap crawler
@@ -224,7 +256,7 @@ rag-server/
 │   │   ├── frontmatter_parser.py# Markdown frontmatter extraction
 │   │   ├── ingestion.py         # Smart upsert/delete
 │   │   ├── markdown_chunker.py # Markdown-aware chunking
-│   │   └── retriever.py         # Hybrid search + reranking
+│   │   └── retriever.py         # Dense search, context expansion, reranking
 │   ├── utils/
 │   └── main.py                  # FastAPI app factory
 ├── tests/
@@ -245,10 +277,23 @@ rag-server/
 |--------|----------|-------------|
 | GET | `/` | Health check |
 | GET | `/api/query?q={question}` | Query RAG system |
+| GET | `/api/query?q={question}&conversation_id={id}` | Continue a conversation-aware query |
 | POST | `/api/ingest/website` | Sync website content |
 | POST | `/api/ingest/github-all-repos` | Sync all GitHub repos |
 | POST | `/api/ingest/notes` | Sync notes repo (blog) manually |
 | POST | `/api/webhooks/github` | GitHub push webhook |
+
+Query responses include:
+
+```json
+{
+  "query": "What database does it use?",
+  "result": "...",
+  "conversation_id": "8e5c...",
+  "rewritten_query": "What database does the RAG server project use?",
+  "sources": []
+}
+```
 
 ## Setup
 
@@ -266,8 +311,10 @@ uv sync --dev
 cp .env.example .env
 # Edit .env with your keys:
 # - ENVIRONMENT=development
+# - DATABASE_URL=postgresql://rag:rag@localhost:5432/rag_server_db
 # - PINECONE_API_KEY
-# - PINECONE_INDEX_HOST  
+# - PINECONE_INDEX_HOST
+# - ENABLE_SPARSE_SEARCH=false
 # - OPENAI_API_KEY
 # - COHERE_API_KEY
 # - GOOGLE_API_KEY
@@ -278,18 +325,82 @@ cp .env.example .env
 # - ADMIN_API_TOKEN (for ingest endpoints request)
 ```
 
-### 3. Install pre-commit hooks
+### 3. Start local Postgres
+
+```bash
+docker compose up -d postgres
+```
+
+The local database uses:
+
+```text
+host: localhost
+port: 5432
+database: rag_server_db
+user: rag
+password: rag
+```
+
+### 4. Install pre-commit hooks
 
 ```bash
 pre-commit install
 ```
 
-### 4. Run server
+### 5. Run server
 
 ```bash
 # Development
 uv run fastapi dev app/main.py
 ```
+
+### 6. Ingest data
+
+Ingestion requires the admin API token:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/ingest/notes" \
+  -H "X-Api-Token: $ADMIN_API_TOKEN"
+
+curl -X POST "http://127.0.0.1:8000/api/ingest/website" \
+  -H "X-Api-Token: $ADMIN_API_TOKEN"
+
+curl -X POST "http://127.0.0.1:8000/api/ingest/github-all-repos" \
+  -H "X-Api-Token: $ADMIN_API_TOKEN"
+```
+
+Ingestion writes vector metadata to Pinecone and full document chunks to PostgreSQL.
+
+### 7. Query locally
+
+```bash
+curl "http://127.0.0.1:8000/api/query?q=What%20framework%20does%20this%20project%20use%3F" \
+  -H "X-Api-Token: $PUBLIC_API_TOKEN"
+```
+
+For follow-up questions, pass the `conversation_id` returned by the previous response:
+
+```bash
+curl "http://127.0.0.1:8000/api/query?q=What%20database%20does%20it%20use%3F&conversation_id=<conversation_id>" \
+  -H "X-Api-Token: $PUBLIC_API_TOKEN"
+```
+
+### Reset local data
+
+Clear PostgreSQL data:
+
+```bash
+docker compose exec postgres psql -U rag -d rag_server_db -c \
+"TRUNCATE retrieval_traces, messages, conversations, chunks, documents RESTART IDENTITY CASCADE;"
+```
+
+Clear Pinecone namespaces:
+
+```bash
+uv run python -c "from app.db.pinecone import clear_namespace; [clear_namespace(ns) for ns in ('github_notes', 'github_repos', 'website_roger_ink')]"
+```
+
+Then rerun the ingestion endpoints.
 
 ## Development
 
@@ -332,6 +443,14 @@ All checks must pass before merging to `main`.
 
 ## Change Log
 
+### 1.2.0 (2026-05-15)
+- Added PostgreSQL persistence for documents, chunks, conversations, messages, and retrieval traces
+- Added local PostgreSQL Docker Compose setup
+- Changed Pinecone metadata to store chunk previews and identifiers instead of full chunk text
+- Added conversation-aware query rewriting with `conversation_id`
+- Added full chunk and neighboring chunk retrieval from PostgreSQL
+- Added `ENABLE_SPARSE_SEARCH` to keep sparse/hybrid search optional per Pinecone index configuration
+
 ### 1.1.1 (2026-05-13)
 - Switched dependency management to `pyproject.toml` and `uv.lock`
 - Removed generated `requirements*.txt` files
@@ -346,6 +465,6 @@ All checks must pass before merging to `main`.
 - [x] Add request rate limiting and authentication (v1.1.0)
 - [ ] Support sync specific GitHub repos
 - [ ] Complete sync blog by GitHub Push Webhook
-- [ ] Add chat memory
+- [x] Add chat memory
 - [ ] Add evaluation strategy
 - [ ] Support streaming responses

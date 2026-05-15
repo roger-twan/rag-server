@@ -37,7 +37,12 @@ class TestQueryEndpoint:
         monkeypatch.setattr(settings, "PUBLIC_API_TOKEN", PUBLIC_TOKEN)
 
         with patch("app.api.routes.generate_answer", new_callable=AsyncMock) as mock_generate:
-            mock_generate.return_value = "This is the answer to your question."
+            mock_generate.return_value = {
+                "answer": "This is the answer to your question.",
+                "conversation_id": "conv-1",
+                "rewritten_query": "What is Python?",
+                "sources": [],
+            }
 
             response = client.get(
                 "/api/query?q=What is Python?",
@@ -48,7 +53,10 @@ class TestQueryEndpoint:
             data = response.json()
             assert data["query"] == "What is Python?"
             assert data["result"] == "This is the answer to your question."
-            mock_generate.assert_called_once_with("What is Python?")
+            assert data["conversation_id"] == "conv-1"
+            assert data["rewritten_query"] == "What is Python?"
+            assert data["sources"] == []
+            mock_generate.assert_called_once_with("What is Python?", conversation_id=None)
 
     @pytest.mark.asyncio
     async def test_query_without_token_returns_401(self):
