@@ -552,4 +552,4 @@ All checks must pass before merging to `main`.
 - [ ] Complete sync blog by GitHub Push Webhook
 - [x] Add chat memory (v1.2.0)
 - [ ] Add evaluation strategy
-- [x] Support streaming responses
+- [x] Support streaming responses (v1.3.0)
