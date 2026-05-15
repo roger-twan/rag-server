@@ -6,6 +6,14 @@ import pytest
 from app.services import answer_generator
 
 
+class FakePrompt:
+    def __init__(self, chain):
+        self.chain = chain
+
+    def __or__(self, llm):
+        return self.chain
+
+
 @pytest.mark.asyncio
 async def test_rewrite_query_skips_llm_when_history_is_empty():
     with (
@@ -25,9 +33,17 @@ async def test_generate_answer_returns_payload_when_no_chunks_found():
         patch("app.services.answer_generator.postgres.get_recent_messages", return_value=[]),
         patch("app.services.answer_generator.postgres.add_message", return_value="msg-1"),
         patch("app.services.answer_generator.retrieve", new_callable=AsyncMock) as mock_retrieve,
+        patch("app.services.answer_generator._get_llm"),
     ):
         mock_retrieve.return_value = []
-        result = await answer_generator.generate_answer("Unknown?", conversation_id="conv-1")
+        fake_chain = AsyncMock()
+        fake_chain.ainvoke.return_value.content = (
+            "I don't have enough information to answer this question."
+        )
+        with patch(
+            "app.services.answer_generator.fallback_prompt_template", FakePrompt(fake_chain)
+        ):
+            result = await answer_generator.generate_answer("Unknown?", conversation_id="conv-1")
 
     assert result == {
         "answer": "I don't have enough information to answer this question.",
@@ -75,3 +91,29 @@ def test_format_history_uses_role_and_content():
     assert answer_generator._format_history(messages) == (
         "user: What is RAG?\nassistant: Retrieval augmented generation."
     )
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_uses_fallback_prompt_when_no_chunks_found():
+    with (
+        patch("app.services.answer_generator.postgres.ensure_conversation", return_value="conv-1"),
+        patch("app.services.answer_generator.postgres.get_recent_messages", return_value=[]),
+        patch("app.services.answer_generator.postgres.add_message", return_value="msg-1"),
+        patch("app.services.answer_generator.retrieve", new_callable=AsyncMock) as mock_retrieve,
+        patch("app.services.answer_generator._get_llm"),
+    ):
+        mock_retrieve.return_value = []
+        fake_chain = AsyncMock()
+        fake_chain.ainvoke.return_value.content = "Hello! What would you like to know?"
+        with patch(
+            "app.services.answer_generator.fallback_prompt_template", FakePrompt(fake_chain)
+        ):
+            result = await answer_generator.generate_answer("hello", conversation_id="conv-1")
+
+    assert result == {
+        "answer": "Hello! What would you like to know?",
+        "conversation_id": "conv-1",
+        "rewritten_query": "hello",
+        "sources": [],
+    }
+    mock_retrieve.assert_awaited_once_with("hello")
