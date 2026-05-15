@@ -30,9 +30,20 @@ def verify_admin_token(x_api_token: str = Header(None)):
 
 @router.get("/query")
 @limiter.limit("10/minute")
-async def query(request: Request, q: str, token: str = Depends(verify_public_token)):
-    answer = await generate_answer(q)
-    return {"query": q, "result": answer}
+async def query(
+    request: Request,
+    q: str,
+    conversation_id: str | None = None,
+    token: str = Depends(verify_public_token),
+):
+    result = await generate_answer(q, conversation_id=conversation_id)
+    return {
+        "query": q,
+        "result": result["answer"],
+        "conversation_id": result["conversation_id"],
+        "rewritten_query": result["rewritten_query"],
+        "sources": result["sources"],
+    }
 
 
 @router.post("/ingest/website")
