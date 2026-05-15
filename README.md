@@ -465,6 +465,6 @@ All checks must pass before merging to `main`.
 - [x] Add request rate limiting and authentication (v1.1.0)
 - [ ] Support sync specific GitHub repos
 - [ ] Complete sync blog by GitHub Push Webhook
-- [x] Add chat memory
+- [x] Add chat memory (v1.2.0)
 - [ ] Add evaluation strategy
 - [ ] Support streaming responses
