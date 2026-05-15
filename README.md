@@ -520,6 +520,9 @@ All checks must pass before merging to `main`.
 
 ## Change Log
 
+### 1.3.1 (2026-10-16)
+- Fixed README.md conflict
+
 ### 1.3.0 (2026-10-16)
 - Added `/api/query/stream` for Server-Sent Events streaming responses
 - Documented streaming event types: `metadata`, `token`, and `done`
@@ -552,8 +555,4 @@ All checks must pass before merging to `main`.
 - [ ] Complete sync blog by GitHub Push Webhook
 - [x] Add chat memory (v1.2.0)
 - [ ] Add evaluation strategy
-<<<<<<< Updated upstream
-- [x] Support streaming responses
-=======
 - [x] Support streaming responses (v1.3.0)
->>>>>>> Stashed changes
