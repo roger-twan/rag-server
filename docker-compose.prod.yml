@@ -10,6 +10,14 @@ services:
     environment:
       ENVIRONMENT: ${PROD_ENVIRONMENT:-production}
       DATABASE_URL: postgresql://${PROD_POSTGRES_USER:-rag_prod}:${PROD_POSTGRES_PASSWORD:-change-me-local-prod}@postgres-prod:5432/${PROD_POSTGRES_DB:-rag_server_db}
+      HTTP_PROXY: ${PROD_HTTP_PROXY:-http://host.docker.internal:7890}
+      HTTPS_PROXY: ${PROD_HTTPS_PROXY:-http://host.docker.internal:7890}
+      ALL_PROXY: ${PROD_ALL_PROXY:-socks5h://host.docker.internal:7890}
+      NO_PROXY: ${PROD_NO_PROXY:-localhost,127.0.0.1,postgres-prod}
+      http_proxy: ${PROD_HTTP_PROXY:-http://host.docker.internal:7890}
+      https_proxy: ${PROD_HTTPS_PROXY:-http://host.docker.internal:7890}
+      all_proxy: ${PROD_ALL_PROXY:-socks5h://host.docker.internal:7890}
+      no_proxy: ${PROD_NO_PROXY:-localhost,127.0.0.1,postgres-prod}
     ports:
       - "${PROD_API_PORT:-8080}:8080"
     depends_on:
