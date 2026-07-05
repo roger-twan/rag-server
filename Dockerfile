@@ -20,6 +20,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy application code
 COPY . .
+RUN uv sync --frozen --no-dev
 
 # Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

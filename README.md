@@ -380,6 +380,45 @@ password: rag
 
 These credentials are for local development only. Production deployments should use secret-managed credentials and a different password.
 
+### Optional: Start a local production-like stack
+
+If you need a local production-like API and Postgres stack, keep it separate
+from the development database:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+It uses separate containers, a separate volume, and separate host ports:
+
+```text
+API: http://localhost:8080
+
+Postgres host: localhost
+Postgres port: 5433
+Postgres database: rag_server_db
+Postgres user: rag_prod
+Postgres password: change-me-local-prod
+```
+
+Use this Postgres connection string from the host:
+
+```text
+postgresql://rag_prod:change-me-local-prod@localhost:5433/rag_server_db
+```
+
+The API container connects to Postgres through Docker's internal network:
+
+```text
+postgresql://rag_prod:change-me-local-prod@postgres-prod:5432/rag_server_db
+```
+
+Override the defaults without editing the compose file:
+
+```bash
+PROD_API_PORT=8081 PROD_POSTGRES_PORT=5433 PROD_POSTGRES_PASSWORD=your-password docker compose -f docker-compose.prod.yml up --build -d
+```
+
 ### 4. Install pre-commit hooks
 
 ```bash

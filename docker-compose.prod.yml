@@ -1,0 +1,42 @@
+name: rag-server-prod
+
+services:
+  api-prod:
+    build: .
+    container_name: rag-server-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: ${PROD_ENVIRONMENT:-production}
+      DATABASE_URL: postgresql://${PROD_POSTGRES_USER:-rag_prod}:${PROD_POSTGRES_PASSWORD:-change-me-local-prod}@postgres-prod:5432/${PROD_POSTGRES_DB:-rag_server_db}
+    ports:
+      - "${PROD_API_PORT:-8080}:8080"
+    depends_on:
+      postgres-prod:
+        condition: service_healthy
+
+  postgres-prod:
+    image: postgres:16-alpine
+    container_name: rag-server-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PROD_POSTGRES_DB:-rag_server_db}
+      POSTGRES_USER: ${PROD_POSTGRES_USER:-rag_prod}
+      POSTGRES_PASSWORD: ${PROD_POSTGRES_PASSWORD:-change-me-local-prod}
+    ports:
+      - "${PROD_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${PROD_POSTGRES_USER:-rag_prod} -d ${PROD_POSTGRES_DB:-rag_server_db}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_prod_data:
