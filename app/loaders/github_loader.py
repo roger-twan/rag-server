@@ -2,6 +2,7 @@
 GitHub loaders for notes repo (real-time) and all other repos (batch).
 """
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -145,62 +146,116 @@ class AllReposLoader:
     EXCLUDED_REPO = "notes"
 
     @staticmethod
-    async def fetch_repo_list() -> list[dict]:
+    async def _github_get_json(client: httpx.AsyncClient, url: str, **kwargs) -> dict | list:
+        last_error = None
+        for attempt in range(1, settings.GITHUB_HTTP_RETRIES + 1):
+            try:
+                response = await client.get(
+                    url,
+                    headers={
+                        "Authorization": f"token {settings.GITHUB_TOKEN}",
+                        "Accept": "application/vnd.github.v3+json",
+                    },
+                    **kwargs,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError:
+                raise
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_error = exc
+                if attempt >= settings.GITHUB_HTTP_RETRIES:
+                    raise
+                await asyncio.sleep(0.5 * attempt)
+
+        raise last_error or RuntimeError("GitHub request failed")
+
+    @staticmethod
+    def _create_client() -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=settings.GITHUB_HTTP_TIMEOUT_SECONDS)
+
+    @staticmethod
+    async def fetch_repo_list(client: httpx.AsyncClient | None = None) -> list[dict]:
         """Fetch list of all repos for the owner."""
         all_repos = []
         page = 1
         per_page = 100  # Max 100 per page
 
-        async with httpx.AsyncClient() as client:
+        owns_client = client is None
+        if client is None:
+            client = AllReposLoader._create_client()
+
+        try:
             while True:
-                response = await client.get(
+                repos = await AllReposLoader._github_get_json(
+                    client,
                     f"https://api.github.com/users/{GITHUB_OWNER}/repos",
                     params={"per_page": per_page, "page": page},
-                    headers={
-                        "Authorization": f"token {settings.GITHUB_TOKEN}",
-                        "Accept": "application/vnd.github.v3+json",
-                    },
                 )
-                response.raise_for_status()
-                repos = response.json()
                 all_repos.extend(repos)
 
                 # If we got less than per_page repos, we've reached the end
                 if len(repos) < per_page:
                     break
                 page += 1
+        finally:
+            if owns_client:
+                await client.aclose()
 
         # Filter out the notes repo
         return [repo for repo in all_repos if repo["name"] != AllReposLoader.EXCLUDED_REPO]
 
     @staticmethod
-    async def fetch_file_content(repo: str, path: str) -> str | None:
+    async def fetch_file_content(
+        repo: str,
+        path: str,
+        client: httpx.AsyncClient | None = None,
+    ) -> str | None:
         """Fetch file content from a repo."""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.github.com/repos/{GITHUB_OWNER}/{repo}/contents/{path}",
-                headers={
-                    "Authorization": f"token {settings.GITHUB_TOKEN}",
-                    "Accept": "application/vnd.github.v3+json",
-                },
-            )
+        owns_client = client is None
+        if client is None:
+            client = AllReposLoader._create_client()
 
-            if response.status_code == 404:
-                return None
+        try:
+            try:
+                data = await AllReposLoader._github_get_json(
+                    client,
+                    f"https://api.github.com/repos/{GITHUB_OWNER}/{repo}/contents/{path}",
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    return None
+                raise
+        finally:
+            if owns_client:
+                await client.aclose()
 
-            response.raise_for_status()
-            data = response.json()
+        if isinstance(data, dict) and "content" in data:
+            # Decode base64 content
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            return content
 
-            if isinstance(data, dict) and "content" in data:
-                # Decode base64 content
-                content = base64.b64decode(data["content"]).decode("utf-8")
-                return content
-
-            return None
+        return None
 
     @staticmethod
-    async def load_repo_document(repo: dict) -> Document | None:
+    async def load_repo_document(
+        repo: dict,
+        client: httpx.AsyncClient | None = None,
+    ) -> Document | None:
         """Load document for a single repo (description + README + package.json)."""
+        owns_client = client is None
+        if client is None:
+            client = AllReposLoader._create_client()
+
+        try:
+            return await AllReposLoader._load_repo_document(repo, client)
+        finally:
+            if owns_client:
+                await client.aclose()
+
+    @staticmethod
+    async def _load_repo_document(repo: dict, client: httpx.AsyncClient) -> Document | None:
+        """Load document for a single repo with a caller-managed HTTP client."""
         repo_name = repo["name"]
         description = repo.get("description") or ""
 
@@ -211,13 +266,17 @@ class AllReposLoader:
             sections.append(f"# Repository: {repo_name}\n\n**Description:** {description}\n")
 
         # Try to fetch README
-        readme_content = await AllReposLoader.fetch_file_content(repo_name, "README.md")
+        readme_content = await AllReposLoader.fetch_file_content(
+            repo_name, "README.md", client=client
+        )
 
         if readme_content:
             sections.append(f"\n## README\n\n{readme_content}")
 
         # Try to fetch package.json
-        package_json = await AllReposLoader.fetch_file_content(repo_name, "package.json")
+        package_json = await AllReposLoader.fetch_file_content(
+            repo_name, "package.json", client=client
+        )
         if package_json:
             try:
                 pkg_data = json.loads(package_json)
@@ -236,25 +295,29 @@ class AllReposLoader:
                 pass  # Skip invalid package.json
 
         # Try to fetch pom.xml (Maven Java)
-        pom_xml = await AllReposLoader.fetch_file_content(repo_name, "pom.xml")
+        pom_xml = await AllReposLoader.fetch_file_content(repo_name, "pom.xml", client=client)
         if pom_xml:
             deps = AllReposLoader._parse_pom_xml(pom_xml)
             if deps:
                 sections.append(
-                    f"\n## Maven Dependencies (pom.xml)\n\n**Dependencies:** {', '.join(deps)}"
+                    f"\n## Java Dependencies (pom.xml)\n\n**Dependencies:** {', '.join(deps)}"
                 )
 
-        # Try to fetch build.gradle (Gradle Java)
-        build_gradle = await AllReposLoader.fetch_file_content(repo_name, "build.gradle")
+        # Try to fetch build.gradle (Gradle)
+        build_gradle = await AllReposLoader.fetch_file_content(
+            repo_name, "build.gradle", client=client
+        )
         if build_gradle:
             deps = AllReposLoader._parse_build_gradle(build_gradle)
             if deps:
                 sections.append(
-                    f"\n## Gradle Dependencies (build.gradle)\n\n**Dependencies:** {', '.join(deps)}"
+                    f"\n## Java Dependencies (build.gradle)\n\n**Dependencies:** {', '.join(deps)}"
                 )
 
         # Try to fetch requirements.txt (Python)
-        requirements = await AllReposLoader.fetch_file_content(repo_name, "requirements.txt")
+        requirements = await AllReposLoader.fetch_file_content(
+            repo_name, "requirements.txt", client=client
+        )
         if requirements:
             deps = AllReposLoader._parse_requirements_txt(requirements)
             if deps:
@@ -263,7 +326,9 @@ class AllReposLoader:
                 )
 
         # Try to fetch pyproject.toml (Python)
-        pyproject = await AllReposLoader.fetch_file_content(repo_name, "pyproject.toml")
+        pyproject = await AllReposLoader.fetch_file_content(
+            repo_name, "pyproject.toml", client=client
+        )
         if pyproject:
             deps = AllReposLoader._parse_pyproject_toml(pyproject)
             if deps:
@@ -272,7 +337,7 @@ class AllReposLoader:
                 )
 
         # Try to fetch setup.py (Python)
-        setup_py = await AllReposLoader.fetch_file_content(repo_name, "setup.py")
+        setup_py = await AllReposLoader.fetch_file_content(repo_name, "setup.py", client=client)
         if setup_py:
             deps = AllReposLoader._parse_setup_py(setup_py)
             if deps:
@@ -281,7 +346,7 @@ class AllReposLoader:
                 )
 
         # Try to fetch Pipfile (Python)
-        pipfile = await AllReposLoader.fetch_file_content(repo_name, "Pipfile")
+        pipfile = await AllReposLoader.fetch_file_content(repo_name, "Pipfile", client=client)
         if pipfile:
             deps = AllReposLoader._parse_pipfile(pipfile)
             if deps:
@@ -290,7 +355,7 @@ class AllReposLoader:
                 )
 
         # Try to fetch pubspec.yaml (Flutter)
-        pubspec = await AllReposLoader.fetch_file_content(repo_name, "pubspec.yaml")
+        pubspec = await AllReposLoader.fetch_file_content(repo_name, "pubspec.yaml", client=client)
         if pubspec:
             deps = AllReposLoader._parse_pubspec_yaml(pubspec)
             if deps:
@@ -501,27 +566,31 @@ class AllReposLoader:
     @staticmethod
     async def load_all_documents() -> list[Document]:
         """Load documents for all repos except notes."""
-        repos = await AllReposLoader.fetch_repo_list()
-        total_repos = len(repos)
         documents = []
 
-        logger.info(f"Starting to load {total_repos} GitHub repos...")
+        async with AllReposLoader._create_client() as client:
+            repos = await AllReposLoader.fetch_repo_list(client=client)
+            total_repos = len(repos)
 
-        for index, repo in enumerate(repos, 1):
-            repo_name = repo.get("name", "unknown")
-            try:
-                logger.info(f"[{index}/{total_repos}] Loading repo: {repo_name}...")
-                doc = await AllReposLoader.load_repo_document(repo)
-                if doc:
-                    documents.append(doc)
-                    logger.info(f"[{index}/{total_repos}] Loaded repo: {repo_name}")
-                else:
-                    logger.info(f"[{index}/{total_repos}] Skipped repo: {repo_name} (no content)")
-            except Exception as e:
-                logger.warning(
-                    f"[{index}/{total_repos}] Failed to load repo {repo_name}: {type(e).__name__}: {e}"
-                )
-                continue
+            logger.info(f"Starting to load {total_repos} GitHub repos...")
+
+            for index, repo in enumerate(repos, 1):
+                repo_name = repo.get("name", "unknown")
+                try:
+                    logger.info(f"[{index}/{total_repos}] Loading repo: {repo_name}...")
+                    doc = await AllReposLoader.load_repo_document(repo, client=client)
+                    if doc:
+                        documents.append(doc)
+                        logger.info(f"[{index}/{total_repos}] Loaded repo: {repo_name}")
+                    else:
+                        logger.info(
+                            f"[{index}/{total_repos}] Skipped repo: {repo_name} (no content)"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[{index}/{total_repos}] Failed to load repo {repo_name}: {type(e).__name__}: {e}"
+                    )
+                    continue
 
         logger.info(
             f"Completed loading repos: {len(documents)}/{total_repos} repos loaded successfully"

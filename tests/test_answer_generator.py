@@ -18,9 +18,11 @@ class FakeStreamingChain:
     def __init__(self, chunks):
         self.chunks = chunks
         self.stream_input = None
+        self.stream_config = None
 
-    async def astream(self, stream_input):
+    async def astream(self, stream_input, config=None):
         self.stream_input = stream_input
+        self.stream_config = config
         for chunk in self.chunks:
             yield chunk
 
@@ -190,6 +192,10 @@ async def test_generate_answer_stream_yields_metadata_tokens_and_done():
     ]
     assert fake_chain.stream_input["question"] == "What is Python?"
     assert "Python is a programming language." in fake_chain.stream_input["context"]
+    assert fake_chain.stream_config["run_name"] == "rag_answer_stream"
+    assert fake_chain.stream_config["metadata"]["conversation_id"] == "conv-1"
+    assert fake_chain.stream_config["metadata"]["chunk_count"] == 1
+    assert fake_chain.stream_config["metadata"]["has_context"] is True
     add_msg.assert_any_call(
         conversation_id="conv-1",
         role="assistant",

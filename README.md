@@ -356,11 +356,35 @@ cp .env.example .env
 # - COHERE_API_KEY
 # - GOOGLE_API_KEY
 # - GITHUB_TOKEN (for repo loading)
+# - GITHUB_HTTP_TIMEOUT_SECONDS=30
+# - GITHUB_HTTP_RETRIES=3
 # - GITHUB_WEBHOOK_SECRET
 # - DEEPSEEK_API_KEY (for DeepSeek LLM)
 # - PUBLIC_API_TOKEN (for /query endpoint request)
 # - ADMIN_API_TOKEN (for ingest endpoints request)
+# - LANGSMITH_TRACING=false
+# - LANGSMITH_API_KEY (optional, for LangSmith tracing)
+# - LANGSMITH_PROJECT=rag-server
 ```
+
+### Optional: Enable LangSmith tracing
+
+LangSmith tracing is off by default. To send LangChain runs to LangSmith, set:
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=<your-langsmith-api-key>
+LANGSMITH_PROJECT=rag-server
+```
+
+If your LangSmith workspace is outside the default US region, also set
+`LANGSMITH_ENDPOINT`. If your API key is linked to multiple workspaces, set
+`LANGSMITH_WORKSPACE_ID`.
+
+Answer generation traces include run names such as `rag_query_rewrite`,
+`rag_answer`, `rag_answer_fallback`, and `rag_answer_stream`, with metadata for
+environment, LLM provider, conversation id, prompt name, retrieved chunk count,
+source count, and whether retrieved context was available.
 
 ### 3. Start local Postgres
 
@@ -518,6 +542,89 @@ Clean up old conversation history and retrieval traces:
 uv run python -c "from app.db.postgres import cleanup_conversations_older_than; print(cleanup_conversations_older_than(30))"
 ```
 
+## Evaluation
+
+The local eval dataset lives in `evals/rag_questions.jsonl`. Run the RAG eval
+runner after the database, Pinecone index, and model API keys are configured:
+
+```bash
+docker compose up -d postgres
+uv run python -m app.evals.run_eval
+```
+
+Useful options:
+
+```bash
+# Smoke test a few cases
+uv run python -m app.evals.run_eval --limit 3
+
+# Use a faster run if your Cohere key is not trial-limited
+uv run python -m app.evals.run_eval --delay-seconds 0
+
+# Fail when the local heuristic average is below a threshold
+uv run python -m app.evals.run_eval --fail-under 0.8
+```
+
+The runner writes `evals/results/results.jsonl` and
+`evals/results/summary.json`. The current local scores are deterministic
+checks for answer presence, expected source matching, and abstention behavior;
+LLM-judged faithfulness and answer relevance can be added on top of the same
+result files. By default, the runner waits 6.5 seconds between cases to stay
+under Cohere trial-key rerank limits.
+
+### LangSmith Dataset and Experiments
+
+After `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT`
+are configured, sync the local JSONL cases into LangSmith:
+
+```bash
+uv run python -m app.evals.langsmith_eval sync-dataset
+```
+
+Run a LangSmith experiment against that dataset:
+
+```bash
+uv run python -m app.evals.langsmith_eval run-experiment
+```
+
+Useful options:
+
+```bash
+# Smoke test a few LangSmith examples
+uv run python -m app.evals.langsmith_eval run-experiment --limit 3
+
+# Use a custom dataset or experiment prefix
+uv run python -m app.evals.langsmith_eval sync-dataset --dataset-name rag-server-personal-qa
+uv run python -m app.evals.langsmith_eval run-experiment --experiment-prefix rag-server-google
+```
+
+### RAGAS Metrics
+
+RAGAS evaluator settings default to `gpt-4o-mini` and
+`text-embedding-3-small`:
+
+```bash
+RAGAS_LLM_MODEL=gpt-4o-mini
+RAGAS_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+Run RAGAS by generating fresh RAG results first:
+
+```bash
+env -u OPENAI_API_KEY uv run python -m app.evals.ragas_eval --limit 3
+```
+
+Or evaluate an existing local eval result file:
+
+```bash
+env -u OPENAI_API_KEY uv run python -m app.evals.ragas_eval \
+  --results-jsonl evals/results/results.jsonl
+```
+
+RAGAS writes `evals/results/ragas/ragas_results.csv` and
+`evals/results/ragas/ragas_summary.json` with `faithfulness`,
+`answer_relevancy`, `context_precision_with_reference`, and `context_recall`.
+
 ## Development
 
 ### Running Tests
@@ -557,39 +664,12 @@ uv run pre-commit run --all-files
 
 All checks must pass before merging to `main`.
 
-## Change Log
+## Build Logs
+
+Full build log history is in [docs/BUILD_LOGS.md](docs/BUILD_LOGS.md).
 
 ### 1.3.2 (2026-05-16)
 - Fixed README.md wrong change log dates
-
-### 1.3.1 (2026-05-16)
-- Fixed README.md conflict
-
-### 1.3.0 (2026-05-16)
-- Added `/api/query/stream` for Server-Sent Events streaming responses
-- Documented streaming event types: `metadata`, `token`, and `done`
-
-### 1.2.1 (2026-05-15)
-- Added fallback prompt behavior for greetings and simple small talk when no RAG context is found
-
-### 1.2.0 (2026-05-15)
-- Added PostgreSQL persistence for documents, chunks, conversations, messages, and retrieval traces
-- Added local PostgreSQL Docker Compose setup
-- Changed Pinecone metadata to store chunk previews and identifiers instead of full chunk text
-- Added conversation-aware query rewriting with `conversation_id`
-- Added full chunk and neighboring chunk retrieval from PostgreSQL
-- Added `ENABLE_SPARSE_SEARCH` to keep sparse/hybrid search optional per Pinecone index configuration
-- Added PostgreSQL conversation cleanup helper for retention jobs
-
-### 1.1.1 (2026-05-13)
-- Switched dependency management to `pyproject.toml` and `uv.lock`
-- Removed generated `requirements*.txt` files
-- Updated Docker, CI, and development docs to use `uv`
-- Added a dynamic README version badge sourced from `pyproject.toml`
-
-### 1.1.0 (2026-04-03)
-- Added API token authentication
-- Added request rate limiting
 
 ## TODO
 - [x] Add request rate limiting and authentication (v1.1.0)

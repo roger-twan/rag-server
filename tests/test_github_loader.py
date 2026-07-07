@@ -1,6 +1,59 @@
 """Tests for github_loader dependency parsers."""
 
+import base64
+from unittest.mock import AsyncMock, patch
+
+import httpx
+import pytest
+
 from app.loaders.github_loader import AllReposLoader
+
+
+class TestGithubHttp:
+    """Tests for GitHub HTTP helper behavior."""
+
+    @pytest.mark.asyncio
+    async def test_github_get_json_retries_timeout(self):
+        request = httpx.Request("GET", "https://api.github.com/test")
+        response = httpx.Response(200, json={"ok": True}, request=request)
+        client = AsyncMock()
+        client.get.side_effect = [httpx.ConnectTimeout("timeout"), response]
+
+        with patch("app.loaders.github_loader.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await AllReposLoader._github_get_json(client, "https://api.github.com/test")
+
+        assert result == {"ok": True}
+        assert client.get.await_count == 2
+        sleep.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_fetch_file_content_returns_none_for_404(self):
+        request = httpx.Request("GET", "https://api.github.com/test")
+        response = httpx.Response(404, json={"message": "Not Found"}, request=request)
+
+        with patch(
+            "app.loaders.github_loader.AllReposLoader._github_get_json",
+            side_effect=httpx.HTTPStatusError("not found", request=request, response=response),
+        ):
+            result = await AllReposLoader.fetch_file_content(
+                "repo", "missing.md", client=AsyncMock()
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_file_content_decodes_base64_content(self):
+        encoded = base64.b64encode(b"# README").decode("ascii")
+
+        with patch(
+            "app.loaders.github_loader.AllReposLoader._github_get_json",
+            return_value={"content": encoded},
+        ):
+            result = await AllReposLoader.fetch_file_content(
+                "repo", "README.md", client=AsyncMock()
+            )
+
+        assert result == "# README"
 
 
 class TestParsePomXml:
