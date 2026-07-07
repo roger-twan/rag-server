@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DATABASE_URL: str = "postgresql://rag:rag@localhost:5432/rag_server_db"
     GITHUB_TOKEN: str = ""
+    GITHUB_HTTP_TIMEOUT_SECONDS: float = 30.0
+    GITHUB_HTTP_RETRIES: int = 3
     GOOGLE_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     COHERE_API_KEY: str = ""
@@ -21,6 +23,14 @@ class Settings(BaseSettings):
     GITHUB_WEBHOOK_SECRET: Optional[str] = None
     PUBLIC_API_TOKEN: str = ""
     ADMIN_API_TOKEN: str = ""
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_API_KEY: str = ""
+    LANGSMITH_PROJECT: str = "rag-server"
+    LANGSMITH_ENDPOINT: str = ""
+    LANGSMITH_WORKSPACE_ID: str = ""
+    LANGCHAIN_CALLBACKS_BACKGROUND: str = ""
+    RAGAS_LLM_MODEL: str = "gpt-4o-mini"
+    RAGAS_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
 
 settings = Settings()

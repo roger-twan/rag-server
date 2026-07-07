@@ -1,3 +1,5 @@
+import logging
+
 from langchain_cohere import CohereRerank
 from pinecone.exceptions import PineconeException
 
@@ -5,6 +7,8 @@ from app.core.config import settings
 from app.db import postgres
 from app.db.pinecone import NAMESPACES, bm25_encoder, get_pinecone_index
 from app.services.embedding import embeddings
+
+logger = logging.getLogger(__name__)
 
 # Initialize Cohere reranker
 cohere_reranker = CohereRerank(
@@ -17,6 +21,28 @@ cohere_reranker = CohereRerank(
 def _get_all_namespaces() -> list[str]:
     """Get list of all namespaces to search across."""
     return list(NAMESPACES.values())
+
+
+def _get_attr(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _candidate_to_chunk(candidate: dict, rerank_score=None) -> dict:
+    metadata = candidate["metadata"]
+    doc_id = metadata.get("doc_id", "")
+    chunk_index = int(metadata.get("chunk_index", 0))
+    neighbors = postgres.get_neighbor_chunks(doc_id, chunk_index, window=1) if doc_id else []
+    text = "\n\n".join(chunk.text for chunk in neighbors) if neighbors else candidate["text"]
+
+    return {
+        "chunk_id": candidate["chunk_id"],
+        "text": text,
+        "score": candidate["score"],
+        "rerank_score": rerank_score,
+        "metadata": metadata,
+    }
 
 
 async def retrieve(
@@ -95,13 +121,15 @@ async def retrieve(
 
     # Rerank with Cohere
     docs = [r["text"] for r in candidates]
-    reranked = cohere_reranker.rerank(query=query, documents=docs)
-
-    # Return top reranked documents
-    def _get_attr(obj, key, default=None):
-        if isinstance(obj, dict):
-            return obj.get(key, default)
-        return getattr(obj, key, default)
+    try:
+        reranked = cohere_reranker.rerank(query=query, documents=docs)
+    except Exception as exc:
+        logger.warning(
+            "Cohere rerank failed; falling back to vector search order: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        return [_candidate_to_chunk(candidate) for candidate in candidates[:rerank_top_n]]
 
     reranked_chunks = []
     seen_chunk_ids = set()
@@ -117,21 +145,7 @@ async def retrieve(
             continue
         seen_chunk_ids.add(chunk_id)
 
-        metadata = candidate["metadata"]
-        doc_id = metadata.get("doc_id", "")
-        chunk_index = int(metadata.get("chunk_index", 0))
-        neighbors = postgres.get_neighbor_chunks(doc_id, chunk_index, window=1) if doc_id else []
-        text = "\n\n".join(chunk.text for chunk in neighbors) if neighbors else candidate["text"]
-
-        reranked_chunks.append(
-            {
-                "chunk_id": chunk_id,
-                "text": text,
-                "score": candidate["score"],
-                "rerank_score": relevance_score,
-                "metadata": metadata,
-            }
-        )
+        reranked_chunks.append(_candidate_to_chunk(candidate, rerank_score=relevance_score))
 
         if len(reranked_chunks) >= rerank_top_n:
             break

@@ -8,7 +8,7 @@
 [![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.12.29-F9D072.svg)](https://www.llamaindex.ai/)
 [![Tests](https://img.shields.io/badge/pytest-9.0.2-green.svg)](https://pytest.org/)
 
-A FastAPI-based Retrieval-Augmented Generation (RAG) server with **PostgreSQL-backed context storage**, **Pinecone vector retrieval**, **conversation-aware query rewriting**, **streaming responses**, **incremental ingestion**, and **multi-source data loaders**.
+A production-oriented FastAPI Retrieval-Augmented Generation (RAG) server with **PostgreSQL-backed context storage**, **Pinecone vector retrieval**, **conversation-aware query rewriting**, **streaming responses**, **incremental multi-source ingestion**, **LangSmith tracing**, and **RAG evaluation with local regression checks and RAGAS metrics**.
 
 ## Architecture Overview
 
@@ -356,11 +356,38 @@ cp .env.example .env
 # - COHERE_API_KEY
 # - GOOGLE_API_KEY
 # - GITHUB_TOKEN (for repo loading)
+# - GITHUB_HTTP_TIMEOUT_SECONDS=30
+# - GITHUB_HTTP_RETRIES=3
 # - GITHUB_WEBHOOK_SECRET
 # - DEEPSEEK_API_KEY (for DeepSeek LLM)
 # - PUBLIC_API_TOKEN (for /query endpoint request)
 # - ADMIN_API_TOKEN (for ingest endpoints request)
+# - LANGSMITH_TRACING=false
+# - LANGSMITH_API_KEY (optional, for LangSmith tracing)
+# - LANGSMITH_PROJECT=rag-server
+# - RAGAS_OPENAI_API_KEY (optional, falls back to OPENAI_API_KEY)
+# - RAGAS_LLM_MODEL=gpt-4o-mini
+# - RAGAS_EMBEDDING_MODEL=text-embedding-3-small
 ```
+
+### Optional: Enable LangSmith tracing
+
+LangSmith tracing is off by default. To send LangChain runs to LangSmith, set:
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=<your-langsmith-api-key>
+LANGSMITH_PROJECT=rag-server
+```
+
+If your LangSmith workspace is outside the default US region, also set
+`LANGSMITH_ENDPOINT`. If your API key is linked to multiple workspaces, set
+`LANGSMITH_WORKSPACE_ID`.
+
+Answer generation traces include run names such as `rag_query_rewrite`,
+`rag_answer`, `rag_answer_fallback`, and `rag_answer_stream`, with metadata for
+environment, LLM provider, conversation id, prompt name, retrieved chunk count,
+source count, and whether retrieved context was available.
 
 ### 3. Start local Postgres
 
@@ -518,6 +545,169 @@ Clean up old conversation history and retrieval traces:
 uv run python -c "from app.db.postgres import cleanup_conversations_older_than; print(cleanup_conversations_older_than(30))"
 ```
 
+## Evaluation
+
+The evaluation stack is split into three layers:
+
+1. `evals/rag_questions.jsonl` defines the regression dataset.
+2. `app.evals.run_eval` calls the real RAG pipeline and writes local results.
+3. RAGAS and LangSmith evaluate those results with RAG-specific metrics and
+   experiment tracking.
+
+This keeps the local runner as the execution layer and RAGAS/LangSmith as
+scoring and observability layers. The same dataset can be reused to compare
+prompt versions, retriever changes, reranker behavior, and answer LLMs.
+
+### Dataset Strategy
+
+The dataset should cover the main product behavior of this personal AI Q&A
+system:
+
+- `profile`: who Roger is and what he does
+- `skills`: technical areas across frontend, backend, AI, and product work
+- `projects`: concrete project and portfolio questions
+- `comparison`: positioning questions such as product engineer vs. pure
+  frontend engineer
+- `negative`: questions the system should not answer without evidence
+- `multi_turn`: follow-up questions that depend on conversation state
+
+Each JSONL case should include a stable `id`, the user `question`, a
+`reference_answer`, expected `reference_sources`, `should_answer`, and `tags`.
+Use this file as a regression suite: add a case whenever a real user question
+fails, a hallucination appears, or retrieval misses an important source.
+
+### Local Runner
+
+Run the local RAG eval runner after PostgreSQL, Pinecone, and model API keys are
+configured:
+
+```bash
+docker compose up -d postgres
+uv run python -m app.evals.run_eval
+```
+
+Useful options:
+
+```bash
+# Smoke test a few cases
+uv run python -m app.evals.run_eval --limit 3
+
+# Use a faster run if your Cohere key is not trial-limited
+uv run python -m app.evals.run_eval --delay-seconds 0
+
+# Fail when the local heuristic average is below a threshold
+uv run python -m app.evals.run_eval --fail-under 0.8
+```
+
+The runner writes `evals/results/results.jsonl` and
+`evals/results/summary.json`. The current local scores are deterministic
+checks for:
+
+- `answer_presence`: answerable cases should produce an answer
+- `source_match`: retrieved sources should include expected references
+- `abstention_correctness`: unanswerable cases should refuse or avoid unsupported
+  claims
+- `final_score`: simple aggregate for local regression checks
+
+By default, the runner waits 6.5 seconds between cases to stay under Cohere
+trial-key rerank limits. If Cohere rerank fails, retrieval falls back to vector
+search order so one external rerank failure does not abort the full eval run.
+
+### LangSmith Dataset and Experiments
+
+After `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT`
+are configured, sync the local JSONL cases into LangSmith:
+
+```bash
+uv run python -m app.evals.langsmith_eval sync-dataset
+```
+
+Run a LangSmith experiment against that dataset:
+
+```bash
+uv run python -m app.evals.langsmith_eval run-experiment
+```
+
+Useful options:
+
+```bash
+# Smoke test a few LangSmith examples
+uv run python -m app.evals.langsmith_eval run-experiment --limit 3
+
+# Use a custom dataset or experiment prefix
+uv run python -m app.evals.langsmith_eval sync-dataset --dataset-name rag-server-personal-qa
+uv run python -m app.evals.langsmith_eval run-experiment --experiment-prefix rag-server-google
+```
+
+### RAGAS Metrics
+
+RAGAS adds LLM-judged RAG metrics on top of the local runner output. Evaluator
+settings default to `gpt-4o-mini` and `text-embedding-3-small`:
+
+```bash
+RAGAS_LLM_MODEL=gpt-4o-mini
+RAGAS_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+Run RAGAS by generating fresh RAG results first:
+
+```bash
+env -u OPENAI_API_KEY uv run python -m app.evals.ragas_eval --limit 3
+```
+
+Or evaluate an existing local eval result file:
+
+```bash
+env -u OPENAI_API_KEY uv run python -m app.evals.ragas_eval \
+  --results-jsonl evals/results/results.jsonl
+```
+
+RAGAS writes `evals/results/ragas/ragas_results.csv` and
+`evals/results/ragas/ragas_summary.json` with `faithfulness`,
+`answer_relevancy`, `context_precision`, and `context_recall`.
+
+Use these metrics as the RAG quality gate:
+
+- `faithfulness`: whether the answer is supported by retrieved context
+- `answer_relevancy`: whether the answer addresses the user question
+- `context_precision`: whether retrieved chunks are useful rather than noisy
+- `context_recall`: whether retrieved context covers the reference answer
+
+For production regression checks, inspect both the overall average and slices by
+case tags. A healthy total score can still hide a weak `projects` or `negative`
+slice.
+
+### Evaluation Workflow
+
+Use this workflow when changing prompts, ingestion, retrieval, reranking, or LLM
+providers:
+
+```bash
+# 1. Run a fast smoke test
+uv run python -m app.evals.run_eval --limit 3
+
+# 2. Run the full deterministic local regression
+uv run python -m app.evals.run_eval --fail-under 0.8
+
+# 3. Add RAGAS metrics for groundedness and retrieval quality
+env -u OPENAI_API_KEY uv run python -m app.evals.ragas_eval \
+  --results-jsonl evals/results/results.jsonl
+
+# 4. Optional: sync and compare experiments in LangSmith
+uv run python -m app.evals.langsmith_eval sync-dataset
+uv run python -m app.evals.langsmith_eval run-experiment
+```
+
+Recommended minimum gates before accepting a major RAG change:
+
+- local `final_score >= 0.80`
+- `faithfulness >= 0.85`
+- `answer_relevancy >= 0.80`
+- `context_precision >= 0.75`
+- `context_recall >= 0.70`
+- no regressions in `negative` or `projects` cases without an intentional
+  dataset update
+
 ## Development
 
 ### Running Tests
@@ -551,50 +741,23 @@ uv run pre-commit run --all-files
 
 **Pull Request Checks:**
 1. **Black** - Code formatting
-2. **isort** - Import sorting  
+2. **isort** - Import sorting
 3. **flake8** - Linting
 4. **pytest** - Full test suite
 
 All checks must pass before merging to `main`.
 
-## Change Log
+## Build Logs
 
-### 1.3.2 (2026-05-16)
-- Fixed README.md wrong change log dates
+Full build log history is in [docs/BUILD_LOGS.md](docs/BUILD_LOGS.md).
 
-### 1.3.1 (2026-05-16)
-- Fixed README.md conflict
-
-### 1.3.0 (2026-05-16)
-- Added `/api/query/stream` for Server-Sent Events streaming responses
-- Documented streaming event types: `metadata`, `token`, and `done`
-
-### 1.2.1 (2026-05-15)
-- Added fallback prompt behavior for greetings and simple small talk when no RAG context is found
-
-### 1.2.0 (2026-05-15)
-- Added PostgreSQL persistence for documents, chunks, conversations, messages, and retrieval traces
-- Added local PostgreSQL Docker Compose setup
-- Changed Pinecone metadata to store chunk previews and identifiers instead of full chunk text
-- Added conversation-aware query rewriting with `conversation_id`
-- Added full chunk and neighboring chunk retrieval from PostgreSQL
-- Added `ENABLE_SPARSE_SEARCH` to keep sparse/hybrid search optional per Pinecone index configuration
-- Added PostgreSQL conversation cleanup helper for retention jobs
-
-### 1.1.1 (2026-05-13)
-- Switched dependency management to `pyproject.toml` and `uv.lock`
-- Removed generated `requirements*.txt` files
-- Updated Docker, CI, and development docs to use `uv`
-- Added a dynamic README version badge sourced from `pyproject.toml`
-
-### 1.1.0 (2026-04-03)
-- Added API token authentication
-- Added request rate limiting
+### 1.4.0 (2026-07-07)
+- Added prompt management, LangSmith tracing, local eval runner, LangSmith experiments, RAGAS metrics, and RAG evaluation strategy documentation
 
 ## TODO
 - [x] Add request rate limiting and authentication (v1.1.0)
 - [ ] Support sync specific GitHub repos
 - [ ] Complete sync blog by GitHub Push Webhook
 - [x] Add chat memory (v1.2.0)
-- [ ] Add evaluation strategy
+- [x] Add evaluation strategy
 - [x] Support streaming responses (v1.3.0)

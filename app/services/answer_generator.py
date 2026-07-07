@@ -1,13 +1,20 @@
 from collections.abc import AsyncIterator
 
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
+from app.core.langsmith import configure_langsmith_tracing
 from app.db import postgres
+from app.services.prompts import (
+    fallback_prompt_template,
+    prompt_template,
+    rewrite_prompt_template,
+)
 from app.services.retriever import retrieve
+
+configure_langsmith_tracing()
 
 # Lazy initialization - only create LLM when needed
 _llm = None
@@ -46,59 +53,43 @@ def _get_llm():
     return _llm
 
 
-# Create prompt template
-prompt_template = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "Answer strictly from the provided context. If the context is insufficient, say you don't have enough information. Be concise and natural.",
-        ),
-        (
-            "human",
-            """Context:
-{context}
-
-Question: {question}
-
-Answer:""",
-        ),
+def _trace_config(
+    run_name: str,
+    *,
+    conversation_id: str | None = None,
+    prompt_name: str | None = None,
+    chunk_count: int | None = None,
+    source_count: int | None = None,
+    has_context: bool | None = None,
+) -> dict:
+    tags = [
+        "rag-server",
+        f"env:{settings.ENVIRONMENT}",
+        f"provider:{settings.LLM_PROVIDER.lower()}",
     ]
-)
+    if prompt_name:
+        tags.append(f"prompt:{prompt_name}")
 
+    metadata = {
+        "environment": settings.ENVIRONMENT,
+        "llm_provider": settings.LLM_PROVIDER.lower(),
+    }
+    if conversation_id is not None:
+        metadata["conversation_id"] = conversation_id
+    if prompt_name is not None:
+        metadata["prompt_name"] = prompt_name
+    if chunk_count is not None:
+        metadata["chunk_count"] = chunk_count
+    if source_count is not None:
+        metadata["source_count"] = source_count
+    if has_context is not None:
+        metadata["has_context"] = has_context
 
-fallback_prompt_template = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "If the user is greeting you, thanking you, or making simple small talk, respond naturally and briefly. If the user asks for factual or personal knowledge that would require retrieved context, say you don't have enough information.",
-        ),
-        (
-            "human",
-            """Question: {question}
-
-Answer:""",
-        ),
-    ]
-)
-
-
-rewrite_prompt_template = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "Rewrite the user's latest question into a standalone search query. Use chat history only to resolve references. Return only the rewritten query.",
-        ),
-        (
-            "human",
-            """Chat history:
-{history}
-
-Latest question: {question}
-
-Standalone search query:""",
-        ),
-    ]
-)
+    return {
+        "run_name": run_name,
+        "tags": tags,
+        "metadata": metadata,
+    }
 
 
 def _format_history(messages: list) -> str:
@@ -117,7 +108,12 @@ async def _rewrite_query(query: str, conversation_id: str) -> str:
         {
             "history": _format_history(history),
             "question": query,
-        }
+        },
+        config=_trace_config(
+            "rag_query_rewrite",
+            conversation_id=conversation_id,
+            prompt_name="rewrite",
+        ),
     )
     rewritten = response.content.strip()
     return rewritten or query
@@ -173,7 +169,11 @@ def _chunk_content(chunk) -> str:
     return str(content) if content is not None else ""
 
 
-async def generate_answer(query: str, conversation_id: str | None = None) -> dict:
+async def generate_answer(
+    query: str,
+    conversation_id: str | None = None,
+    include_contexts: bool = False,
+) -> dict:
     """
     Generate answer using RAG pipeline:
     1. Retrieve relevant documents
@@ -200,15 +200,28 @@ async def generate_answer(query: str, conversation_id: str | None = None) -> dic
 
     if not chunks:
         fallback_chain = fallback_prompt_template | _get_llm()
-        fallback_response = await fallback_chain.ainvoke({"question": query})
+        fallback_response = await fallback_chain.ainvoke(
+            {"question": query},
+            config=_trace_config(
+                "rag_answer_fallback",
+                conversation_id=conversation_id,
+                prompt_name="fallback",
+                chunk_count=0,
+                source_count=0,
+                has_context=False,
+            ),
+        )
         answer = fallback_response.content
         postgres.add_message(conversation_id=conversation_id, role="assistant", content=answer)
-        return {
+        payload = {
             "answer": answer,
             "conversation_id": conversation_id,
             "rewritten_query": rewritten_query,
             "sources": [],
         }
+        if include_contexts:
+            payload["retrieved_contexts"] = []
+        return payload
 
     # Format context
     context = _format_context(chunks)
@@ -219,7 +232,15 @@ async def generate_answer(query: str, conversation_id: str | None = None) -> dic
         {
             "context": context,
             "question": query,
-        }
+        },
+        config=_trace_config(
+            "rag_answer",
+            conversation_id=conversation_id,
+            prompt_name="answer",
+            chunk_count=len(chunks),
+            source_count=len(_format_sources(chunks)),
+            has_context=True,
+        ),
     )
 
     answer = response.content
@@ -230,12 +251,15 @@ async def generate_answer(query: str, conversation_id: str | None = None) -> dic
         chunks=chunks,
     )
 
-    return {
+    payload = {
         "answer": answer,
         "conversation_id": conversation_id,
         "rewritten_query": rewritten_query,
         "sources": _format_sources(chunks),
     }
+    if include_contexts:
+        payload["retrieved_contexts"] = [chunk["text"] for chunk in chunks]
+    return payload
 
 
 async def generate_answer_stream(
@@ -265,12 +289,28 @@ async def generate_answer_stream(
             "context": _format_context(chunks),
             "question": query,
         }
+        stream_config = _trace_config(
+            "rag_answer_stream",
+            conversation_id=conversation_id,
+            prompt_name="answer",
+            chunk_count=len(chunks),
+            source_count=len(sources),
+            has_context=True,
+        )
     else:
         chain = fallback_prompt_template | _get_llm()
         stream_input = {"question": query}
+        stream_config = _trace_config(
+            "rag_answer_stream_fallback",
+            conversation_id=conversation_id,
+            prompt_name="fallback",
+            chunk_count=0,
+            source_count=0,
+            has_context=False,
+        )
 
     answer_parts = []
-    async for chunk in chain.astream(stream_input):
+    async for chunk in chain.astream(stream_input, config=stream_config):
         token = _chunk_content(chunk)
         if not token:
             continue
