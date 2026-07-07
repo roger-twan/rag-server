@@ -1,5 +1,15 @@
 # Build Logs
 
+### 1.4.0 (2026-07-07)
+- Added prompt template management in `app/services/prompts.py`
+- Added LangSmith tracing configuration for RAG runs
+- Added local RAG evaluation dataset and deterministic eval runner
+- Added LangSmith dataset sync and experiment runner
+- Added RAGAS evaluation with faithfulness, answer relevancy, context precision, and context recall metrics
+- Added RAG evaluation strategy documentation and production quality gates
+- Improved GitHub ingestion resilience with shared HTTP client, timeout settings, and retries
+- Added Cohere rerank fallback to vector search order when rerank is unavailable
+
 ### 1.3.2 (2026-05-16)
 - Fixed README.md wrong change log dates
 

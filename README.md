@@ -8,7 +8,7 @@
 [![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.12.29-F9D072.svg)](https://www.llamaindex.ai/)
 [![Tests](https://img.shields.io/badge/pytest-9.0.2-green.svg)](https://pytest.org/)
 
-A FastAPI-based Retrieval-Augmented Generation (RAG) server with **PostgreSQL-backed context storage**, **Pinecone vector retrieval**, **conversation-aware query rewriting**, **streaming responses**, **incremental ingestion**, and **multi-source data loaders**.
+A production-oriented FastAPI Retrieval-Augmented Generation (RAG) server with **PostgreSQL-backed context storage**, **Pinecone vector retrieval**, **conversation-aware query rewriting**, **streaming responses**, **incremental multi-source ingestion**, **LangSmith tracing**, and **RAG evaluation with local regression checks and RAGAS metrics**.
 
 ## Architecture Overview
 
@@ -365,6 +365,9 @@ cp .env.example .env
 # - LANGSMITH_TRACING=false
 # - LANGSMITH_API_KEY (optional, for LangSmith tracing)
 # - LANGSMITH_PROJECT=rag-server
+# - RAGAS_OPENAI_API_KEY (optional, falls back to OPENAI_API_KEY)
+# - RAGAS_LLM_MODEL=gpt-4o-mini
+# - RAGAS_EMBEDDING_MODEL=text-embedding-3-small
 ```
 
 ### Optional: Enable LangSmith tracing
@@ -544,8 +547,39 @@ uv run python -c "from app.db.postgres import cleanup_conversations_older_than; 
 
 ## Evaluation
 
-The local eval dataset lives in `evals/rag_questions.jsonl`. Run the RAG eval
-runner after the database, Pinecone index, and model API keys are configured:
+The evaluation stack is split into three layers:
+
+1. `evals/rag_questions.jsonl` defines the regression dataset.
+2. `app.evals.run_eval` calls the real RAG pipeline and writes local results.
+3. RAGAS and LangSmith evaluate those results with RAG-specific metrics and
+   experiment tracking.
+
+This keeps the local runner as the execution layer and RAGAS/LangSmith as
+scoring and observability layers. The same dataset can be reused to compare
+prompt versions, retriever changes, reranker behavior, and answer LLMs.
+
+### Dataset Strategy
+
+The dataset should cover the main product behavior of this personal AI Q&A
+system:
+
+- `profile`: who Roger is and what he does
+- `skills`: technical areas across frontend, backend, AI, and product work
+- `projects`: concrete project and portfolio questions
+- `comparison`: positioning questions such as product engineer vs. pure
+  frontend engineer
+- `negative`: questions the system should not answer without evidence
+- `multi_turn`: follow-up questions that depend on conversation state
+
+Each JSONL case should include a stable `id`, the user `question`, a
+`reference_answer`, expected `reference_sources`, `should_answer`, and `tags`.
+Use this file as a regression suite: add a case whenever a real user question
+fails, a hallucination appears, or retrieval misses an important source.
+
+### Local Runner
+
+Run the local RAG eval runner after PostgreSQL, Pinecone, and model API keys are
+configured:
 
 ```bash
 docker compose up -d postgres
@@ -567,10 +601,17 @@ uv run python -m app.evals.run_eval --fail-under 0.8
 
 The runner writes `evals/results/results.jsonl` and
 `evals/results/summary.json`. The current local scores are deterministic
-checks for answer presence, expected source matching, and abstention behavior;
-LLM-judged faithfulness and answer relevance can be added on top of the same
-result files. By default, the runner waits 6.5 seconds between cases to stay
-under Cohere trial-key rerank limits.
+checks for:
+
+- `answer_presence`: answerable cases should produce an answer
+- `source_match`: retrieved sources should include expected references
+- `abstention_correctness`: unanswerable cases should refuse or avoid unsupported
+  claims
+- `final_score`: simple aggregate for local regression checks
+
+By default, the runner waits 6.5 seconds between cases to stay under Cohere
+trial-key rerank limits. If Cohere rerank fails, retrieval falls back to vector
+search order so one external rerank failure does not abort the full eval run.
 
 ### LangSmith Dataset and Experiments
 
@@ -600,8 +641,8 @@ uv run python -m app.evals.langsmith_eval run-experiment --experiment-prefix rag
 
 ### RAGAS Metrics
 
-RAGAS evaluator settings default to `gpt-4o-mini` and
-`text-embedding-3-small`:
+RAGAS adds LLM-judged RAG metrics on top of the local runner output. Evaluator
+settings default to `gpt-4o-mini` and `text-embedding-3-small`:
 
 ```bash
 RAGAS_LLM_MODEL=gpt-4o-mini
@@ -623,7 +664,49 @@ env -u OPENAI_API_KEY uv run python -m app.evals.ragas_eval \
 
 RAGAS writes `evals/results/ragas/ragas_results.csv` and
 `evals/results/ragas/ragas_summary.json` with `faithfulness`,
-`answer_relevancy`, `context_precision_with_reference`, and `context_recall`.
+`answer_relevancy`, `context_precision`, and `context_recall`.
+
+Use these metrics as the RAG quality gate:
+
+- `faithfulness`: whether the answer is supported by retrieved context
+- `answer_relevancy`: whether the answer addresses the user question
+- `context_precision`: whether retrieved chunks are useful rather than noisy
+- `context_recall`: whether retrieved context covers the reference answer
+
+For production regression checks, inspect both the overall average and slices by
+case tags. A healthy total score can still hide a weak `projects` or `negative`
+slice.
+
+### Evaluation Workflow
+
+Use this workflow when changing prompts, ingestion, retrieval, reranking, or LLM
+providers:
+
+```bash
+# 1. Run a fast smoke test
+uv run python -m app.evals.run_eval --limit 3
+
+# 2. Run the full deterministic local regression
+uv run python -m app.evals.run_eval --fail-under 0.8
+
+# 3. Add RAGAS metrics for groundedness and retrieval quality
+env -u OPENAI_API_KEY uv run python -m app.evals.ragas_eval \
+  --results-jsonl evals/results/results.jsonl
+
+# 4. Optional: sync and compare experiments in LangSmith
+uv run python -m app.evals.langsmith_eval sync-dataset
+uv run python -m app.evals.langsmith_eval run-experiment
+```
+
+Recommended minimum gates before accepting a major RAG change:
+
+- local `final_score >= 0.80`
+- `faithfulness >= 0.85`
+- `answer_relevancy >= 0.80`
+- `context_precision >= 0.75`
+- `context_recall >= 0.70`
+- no regressions in `negative` or `projects` cases without an intentional
+  dataset update
 
 ## Development
 
@@ -658,7 +741,7 @@ uv run pre-commit run --all-files
 
 **Pull Request Checks:**
 1. **Black** - Code formatting
-2. **isort** - Import sorting  
+2. **isort** - Import sorting
 3. **flake8** - Linting
 4. **pytest** - Full test suite
 
@@ -668,13 +751,13 @@ All checks must pass before merging to `main`.
 
 Full build log history is in [docs/BUILD_LOGS.md](docs/BUILD_LOGS.md).
 
-### 1.3.2 (2026-05-16)
-- Fixed README.md wrong change log dates
+### 1.4.0 (2026-07-07)
+- Added prompt management, LangSmith tracing, local eval runner, LangSmith experiments, RAGAS metrics, and RAG evaluation strategy documentation
 
 ## TODO
 - [x] Add request rate limiting and authentication (v1.1.0)
 - [ ] Support sync specific GitHub repos
 - [ ] Complete sync blog by GitHub Push Webhook
 - [x] Add chat memory (v1.2.0)
-- [ ] Add evaluation strategy
+- [x] Add evaluation strategy
 - [x] Support streaming responses (v1.3.0)
